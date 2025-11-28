@@ -95,13 +95,13 @@ struct AsyncInitializedGlobalTests {
         let counter = Box(Atomic(0))
         let global = Box(AsyncInitializedGlobal<Int>())
         let task1 = Task {
-            return try await global.value.acquire {
+            try await global.value.acquire {
                 try await Task.sleep(for: .milliseconds(2))
                 return counter.value.add(1, ordering: .relaxed).newValue
             }
         }
         let task2 = Task {
-            return try await global.value.acquire {
+            try await global.value.acquire {
                 try await Task.sleep(for: .milliseconds(2))
                 return counter.value.add(1, ordering: .relaxed).newValue
             }
@@ -117,13 +117,13 @@ struct AsyncInitializedGlobalTests {
         let counter = Box(Atomic(0))
         let global = Box(AsyncInitializedGlobal<Int>())
         let task1 = Task {
-            return try await global.value.acquire {
+            try await global.value.acquire {
                 try await Task.sleep(for: .milliseconds(2))
                 return counter.value.add(1, ordering: .relaxed).newValue
             }
         }
         let task2 = Task {
-            return try await global.value.acquire {
+            try await global.value.acquire {
                 try await Task.sleep(for: .milliseconds(2))
                 return counter.value.add(1, ordering: .relaxed).newValue
             }
