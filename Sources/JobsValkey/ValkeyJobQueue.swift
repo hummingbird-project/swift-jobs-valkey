@@ -64,16 +64,10 @@ public final class ValkeyJobQueue: JobQueueDriver {
     /// Options for job pushed to queue
     public struct JobOptions: JobOptionsProtocol {
         /// Delay running job until
-        public var delayUntil: Date?
+        public var delayUntil: Date
 
         /// Default initializer for JobOptions
-        public init() {
-            self.delayUntil = nil
-        }
-
-        ///  Initializer for JobOptions
-        /// - Parameter delayUntil: Whether job execution should be delayed until a later date
-        public init(delayUntil: Date?) {
+        public init(delayUntil: Date) {
             self.delayUntil = delayUntil
         }
     }
@@ -165,7 +159,7 @@ public final class ValkeyJobQueue: JobQueueDriver {
                 self.configuration.pendingQueueKey,
                 data: [
                     .init(
-                        score: options.delayUntil?.timeIntervalSince1970 ?? Date.now.timeIntervalSince1970,
+                        score: options.delayUntil.timeIntervalSince1970,
                         member: jobID.description
                     )
                 ]
