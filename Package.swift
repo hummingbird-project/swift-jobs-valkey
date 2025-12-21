@@ -11,7 +11,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/hummingbird-project/swift-jobs.git", from: "1.0.0"),
-        .package(url: "https://github.com/valkey-io/valkey-swift", from: "0.2.0"),
+        .package(url: "https://github.com/valkey-io/valkey-swift", from: "0.5.0"),
     ],
     targets: [
         .target(
