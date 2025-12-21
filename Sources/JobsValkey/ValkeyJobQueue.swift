@@ -42,8 +42,8 @@ public final class ValkeyJobQueue: JobQueueDriver {
             self.value = String(buffer: buffer)
         }
 
-        public init(fromRESP token: RESPToken) throws {
-            self.value = try String(fromRESP: token)
+        public init(_ token: RESPToken) throws {
+            self.value = try String(token)
         }
 
         public var respEntries: Int { 1 }
@@ -246,7 +246,7 @@ public final class ValkeyJobQueue: JobQueueDriver {
     }
 
     func get(jobID: JobID) async throws -> ByteBuffer? {
-        try await self.valkeyClient.get(jobID.valkeyKey(for: self))
+        try await self.valkeyClient.get(jobID.valkeyKey(for: self)).map { ByteBuffer($0) }
     }
 
     func delete(jobIDs: [JobID]) async throws {
@@ -263,7 +263,7 @@ extension ValkeyJobQueue: JobMetadataDriver {
     @inlinable
     public func getMetadata(_ key: String) async throws -> ByteBuffer? {
         let key = "\(self.configuration.metadataKeyPrefix)\(key)"
-        return try await self.valkeyClient.get(.init(key))
+        return try await self.valkeyClient.get(.init(key)).map { ByteBuffer($0) }
     }
 
     /// Set job queue metadata
@@ -288,7 +288,7 @@ extension ValkeyJobQueue: JobMetadataDriver {
         let key = ValkeyKey("\(self.configuration.metadataKeyPrefix)\(key)")
         return try await self.valkeyClient.withConnection { connection in
             try await connection.watch(keys: [key])
-            let contents = try await connection.get(key)
+            let contents = try await connection.get(key).map { ByteBuffer($0) }
             if contents == id {
                 try await connection.expireat(key, unixTimeSeconds: Date.now + expiresIn)
                 return true
@@ -307,7 +307,7 @@ extension ValkeyJobQueue: JobMetadataDriver {
     public func releaseLock(key: String, id: ByteBuffer) async throws {
         let key = ValkeyKey("\(self.configuration.metadataKeyPrefix)\(key)")
         try await self.valkeyClient.withConnection { connection in
-            let contents = try await connection.get(key)
+            let contents = try await connection.get(key).map { ByteBuffer($0) }
             if contents == id {
                 try await connection.del(keys: [key])
             }

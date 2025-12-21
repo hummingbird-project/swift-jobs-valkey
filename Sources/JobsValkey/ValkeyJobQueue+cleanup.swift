@@ -13,6 +13,7 @@
 //===----------------------------------------------------------------------===//
 
 import Jobs
+import NIOCore
 import Valkey
 
 #if canImport(FoundationEssentials)
@@ -209,7 +210,7 @@ extension ValkeyJobQueue {
             guard let response = try await self.valkeyClient.rpop(key, count: 100) else {
                 break
             }
-            guard let jobIDs = try? [JobID](fromRESP: response) else {
+            guard let jobIDs = try? [JobID](response) else {
                 throw ValkeyQueueError.unexpectedValkeyKeyType
             }
             try await self.delete(jobIDs: jobIDs)
@@ -258,12 +259,12 @@ extension ValkeyJobQueue {
                 // if we broke out of the loop before reaching the end we found a value which shouldnt be
                 // deleted. Delete everything up until that point and add the remaining values back into the
                 // sorted set
-                let jobIDs = values[..<index].map { JobID(buffer: $0.value) }
+                let jobIDs = values[..<index].map { JobID(buffer: ByteBuffer($0.value)) }
                 try await self.delete(jobIDs: jobIDs)
                 _ = try await self.valkeyClient.zadd(key, data: values[index...].map { .init(score: $0.score, member: $0.value) })
             } else {
                 // delete all jobIDs returned by zpopmin
-                let jobIDs = values.map { JobID(buffer: $0.value) }
+                let jobIDs = values.map { JobID(buffer: ByteBuffer($0.value)) }
                 try await self.delete(jobIDs: jobIDs)
             }
         }
