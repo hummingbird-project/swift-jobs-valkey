@@ -67,6 +67,12 @@ public final class ValkeyJobQueue: JobQueueDriver {
         public var delayUntil: Date
 
         /// Default initializer for JobOptions
+        public init() {
+            self.delayUntil = .now
+        }
+
+        /// Initializer for JobOptions
+        /// - Parameter delayUntil: Time to delay job until
         public init(delayUntil: Date) {
             self.delayUntil = delayUntil
         }
