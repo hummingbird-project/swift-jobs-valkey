@@ -1033,4 +1033,19 @@ struct JobsValkeyTests {
             }
         }
     }
+    
+    @Test func testJobIdCodableSerialization() async throws {
+        let id = ValkeyJobQueue.JobID()
+        
+        // 1 - Encoding
+        let encoder = JSONEncoder()
+        let data = try encoder.encode(id)
+        
+        // 2 - Decoding
+        let decoder = JSONDecoder()
+        let decodedId = try decoder.decode(ValkeyJobQueue.JobID.self, from: data)
+        
+        // 3 - Verify
+        #expect(id == decodedId)
+    }
 }
