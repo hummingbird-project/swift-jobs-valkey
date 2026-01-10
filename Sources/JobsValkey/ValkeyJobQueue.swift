@@ -59,6 +59,16 @@ public final class ValkeyJobQueue: JobQueueDriver {
         public var description: String {
             self.value
         }
+        
+        public init(from decoder: any Decoder) throws {
+            let container = try decoder.singleValueContainer()
+            self.value = try container.decode(String.self)
+        }
+        
+        public func encode(to encoder: any Encoder) throws {
+            var container = encoder.singleValueContainer()
+            try container.encode(value)
+        }
     }
 
     /// Options for job pushed to queue
