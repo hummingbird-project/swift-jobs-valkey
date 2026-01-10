@@ -26,7 +26,7 @@ import Foundation
 
 /// Valkey implementation of job queue driver
 public final class ValkeyJobQueue: JobQueueDriver {
-    public struct JobID: Sendable, CustomStringConvertible, Equatable, RESPStringRenderable, RESPTokenDecodable {
+    public struct JobID: Sendable, CustomStringConvertible, Equatable, Codable, RESPStringRenderable, RESPTokenDecodable {
         let value: String
 
         @usableFromInline
