@@ -26,7 +26,7 @@ import Foundation
 
 /// Valkey implementation of job queue driver
 public final class ValkeyJobQueue: JobQueueDriver {
-    public struct JobID: Sendable, CustomStringConvertible, Equatable, RESPStringRenderable, RESPTokenDecodable {
+    public struct JobID: Sendable, CustomStringConvertible, Equatable, Codable, RESPStringRenderable, RESPTokenDecodable {
         let value: String
 
         @usableFromInline
@@ -58,6 +58,16 @@ public final class ValkeyJobQueue: JobQueueDriver {
         /// String description of Identifier
         public var description: String {
             self.value
+        }
+
+        public init(from decoder: any Decoder) throws {
+            let container = try decoder.singleValueContainer()
+            self.value = try container.decode(String.self)
+        }
+
+        public func encode(to encoder: any Encoder) throws {
+            var container = encoder.singleValueContainer()
+            try container.encode(value)
         }
     }
 
