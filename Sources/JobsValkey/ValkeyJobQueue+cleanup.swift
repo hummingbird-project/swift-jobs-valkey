@@ -181,7 +181,7 @@ extension ValkeyJobQueue {
         try await self.cleanupSortedSet(key: self.configuration.pausedQueueKey, cleanup: pausedJobs)
     }
 
-    /// Clean up jobs stuck in processing
+    /// Clean up jobs stuck in processing because their worker is no longer active
     public func cleanupProcessingJobs(maxJobsToProcess: Int) async throws {
         do {
             let bytes: [UInt8] = (0..<16).map { _ in UInt8.random(in: 0...255) }
@@ -335,8 +335,4 @@ extension ValkeyJobQueue {
             }
         }
     }
-}
-
-extension ValkeyJobQueue {
-
 }
