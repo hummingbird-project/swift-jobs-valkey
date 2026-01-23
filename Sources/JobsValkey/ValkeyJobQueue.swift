@@ -105,6 +105,10 @@ public final class ValkeyJobQueue: JobQueueDriver {
         }
     }
 
+    /// metadata keys
+    static let workerIDMetaDataKey = "workerID"
+    static let processingStartedMetaDataKey = "processingStarted"
+
     @usableFromInline
     let valkeyClient: ValkeyClient
     @usableFromInline
@@ -136,6 +140,7 @@ public final class ValkeyJobQueue: JobQueueDriver {
     /// Initialize loading of functions and wait until it has finished
     public func waitUntilReady() async throws {
         try await self.loadFunctions()
+        try await self.cleanupProcessingJobs(maxJobsToProcess: .max)
     }
 
     ///  Register job
@@ -254,8 +259,8 @@ public final class ValkeyJobQueue: JobQueueDriver {
                 try await self.valkeyClient.hmset(
                     jobID.valkeyMetadataKey(for: self),
                     data: [
-                        .init(field: "workerID", value: self.workerContext.id),
-                        .init(field: "processingStart", value: "\(Date.now.timeIntervalSince1970)"),
+                        .init(field: Self.workerIDMetaDataKey, value: self.workerContext.id),
+                        .init(field: Self.processingStartedMetaDataKey, value: "\(Date.now.timeIntervalSince1970)"),
                     ]
                 )
                 return .init(id: jobID, result: .success(jobInstance))

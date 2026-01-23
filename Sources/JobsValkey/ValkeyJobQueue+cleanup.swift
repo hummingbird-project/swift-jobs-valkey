@@ -12,6 +12,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+import ExtrasBase64
 import Jobs
 import NIOCore
 import Valkey
@@ -45,6 +46,18 @@ public struct ValkeyJobCleanupParameters: Sendable & Codable {
         self.failedJobs = failedJobs
         self.cancelledJobs = cancelledJobs
         self.pausedJobs = pausedJobs
+    }
+}
+
+/// Parameters for cleanup of jobs stuck in processing
+public struct ValkeyProcessingJobCleanupParameters: Sendable, Codable {
+    let maxJobsToProcess: Int
+
+    ///  Initialize ValkeyProcessingJobCleanupParameters
+    /// - Parameters:
+    ///   - maxJobsToProcess: Maximum number of jobs to process in one go
+    public init(maxJobsToProcess: Int) {
+        self.maxJobsToProcess = maxJobsToProcess
     }
 }
 
@@ -103,10 +116,17 @@ extension ValkeyJobQueue {
         .init("_Jobs_ValkeyCleanup_\(self.configuration.queueName)")
     }
 
+    /// clean of hung processing jobs job name.
+    ///
+    /// Use this with the ``/Jobs/JobSchedule`` to schedule a cleanup hung processing jobs
+    public var cleanupProcessingJob: JobName<ValkeyProcessingJobCleanupParameters> {
+        .init("_Jobs_ValkeyProcessingCleanup_\(self.configuration.queueName)")
+    }
+
     /// register clean up job on queue
     func registerCleanupJob() {
         self.registerJob(
-            JobDefinition(name: cleanupJob, parameters: ValkeyJobCleanupParameters.self, retryStrategy: .dontRetry) { parameters, context in
+            JobDefinition(name: cleanupJob, retryStrategy: .dontRetry) { parameters, context in
                 try await self.cleanup(
                     pendingJobs: .doNothing,
                     processingJobs: .doNothing,
@@ -115,6 +135,11 @@ extension ValkeyJobQueue {
                     cancelledJobs: parameters.cancelledJobs,
                     pausedJobs: parameters.pausedJobs
                 )
+            }
+        )
+        self.registerJob(
+            JobDefinition(name: cleanupProcessingJob, retryStrategy: .dontRetry) { parameters, context in
+                try await self.cleanupProcessingJobs(maxJobsToProcess: parameters.maxJobsToProcess)
             }
         )
     }
@@ -154,6 +179,41 @@ extension ValkeyJobQueue {
         try await self.cleanupSortedSet(key: self.configuration.cancelledQueueKey, cleanup: cancelledJobs)
         try await self.cleanupSortedSet(key: self.configuration.completedQueueKey, cleanup: completedJobs)
         try await self.cleanupSortedSet(key: self.configuration.pausedQueueKey, cleanup: pausedJobs)
+    }
+
+    /// Clean up jobs stuck in processing
+    public func cleanupProcessingJobs(maxJobsToProcess: Int) async throws {
+        do {
+            let bytes: [UInt8] = (0..<16).map { _ in UInt8.random(in: 0...255) }
+            let lockID = ByteBuffer(string: Base64.encodeToString(bytes: bytes))
+            let ids = try await self.valkeyClient.lrange(self.configuration.processingQueueKey, start: 0, stop: maxJobsToProcess)
+            for id in ids {
+                let id = try JobID(id)
+                if let workerID = try await self.valkeyClient.hget(id.valkeyMetadataKey(for: self), field: Self.workerIDMetaDataKey).map({
+                    String($0)
+                }) {
+                    if try await self.acquireLock(key: .jobWorkerActiveLock(workerID: workerID), id: lockID, expiresIn: 10) {
+                        // we acquired the lock so the worker must have gone down, reschedule the job
+                        self.logger.debug("Re-scheduling Job", metadata: ["JobID": .stringConvertible(id)])
+                        _ = try await valkeyClient.execute(
+                            LREM(self.configuration.processingQueueKey, count: 0, element: id),
+                            ZADD(
+                                self.configuration.pendingQueueKey,
+                                data: [
+                                    .init(
+                                        score: Date.now.timeIntervalSince1970,
+                                        member: id
+                                    )
+                                ]
+                            )
+                        ).1.get()
+                    }
+                }
+            }
+        } catch {
+            self.logger.info("Cleanup of hung processing jobs failed: \(error)")
+            throw error
+        }
     }
 
     /// What to do with set at initialization
@@ -269,4 +329,8 @@ extension ValkeyJobQueue {
             }
         }
     }
+}
+
+extension ValkeyJobQueue {
+
 }
