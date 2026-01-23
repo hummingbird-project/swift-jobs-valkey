@@ -186,14 +186,20 @@ extension ValkeyJobQueue {
         do {
             let bytes: [UInt8] = (0..<16).map { _ in UInt8.random(in: 0...255) }
             let lockID = ByteBuffer(string: Base64.encodeToString(bytes: bytes))
+            var workersInactive: Set<String> = .init()
             let ids = try await self.valkeyClient.lrange(self.configuration.processingQueueKey, start: 0, stop: maxJobsToProcess)
             for id in ids {
                 let id = try JobID(id)
                 if let workerID = try await self.valkeyClient.hget(id.valkeyMetadataKey(for: self), field: Self.workerIDMetaDataKey).map({
                     String($0)
                 }) {
-                    if try await self.acquireLock(key: .jobWorkerActiveLock(workerID: workerID), id: lockID, expiresIn: 10) {
+                    var inactive = workersInactive.contains(workerID)
+                    if !inactive {
+                        inactive = try await self.acquireLock(key: .jobWorkerActiveLock(workerID: workerID), id: lockID, expiresIn: 10)
+                    }
+                    if inactive {
                         // we acquired the lock so the worker must have gone down, reschedule the job
+                        workersInactive.insert(workerID)
                         self.logger.debug("Re-scheduling Job", metadata: ["JobID": .stringConvertible(id)])
                         _ = try await valkeyClient.execute(
                             LREM(self.configuration.processingQueueKey, count: 0, element: id),
