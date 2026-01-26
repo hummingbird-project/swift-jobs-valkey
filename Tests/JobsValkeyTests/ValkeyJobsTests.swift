@@ -32,7 +32,7 @@ struct JobsValkeyTests {
         function: String = #function
     ) async throws -> JobQueue<ValkeyJobQueue> {
         var logger = Logger(label: function)
-        logger.logLevel = .debug
+        logger.logLevel = .trace
         let valkey = ValkeyClient(.hostname(Self.valkeyHostname, port: 6379), logger: logger)
         return try await JobQueue(
             .valkey(valkey, configuration: configuration, logger: logger),
@@ -1054,8 +1054,9 @@ struct JobsValkeyTests {
     }
 
     @Test func testCleanupHungProcessingJobs() async throws {
+        // Create queue, add job to it and push onto processing queue
         let jobQueue = try await self.createJobQueue(
-            configuration: .init(queueName: #function, retentionPolicy: .init(cancelledJobs: .retain))
+            configuration: .init(queueName: #function)
         )
         async let _ = jobQueue.queue.valkeyClient.run()
         let (stream, cont) = AsyncStream.makeStream(of: Void.self)
@@ -1067,13 +1068,23 @@ struct JobsValkeyTests {
         }
         try await jobQueue.queue.waitUntilReady()
         try await jobQueue.push(BarrierJob())
+        // push job onto processing queue
         let jobIterator = jobQueue.queue.makeAsyncIterator()
         _ = try #require(try await jobIterator.next())
 
+        /// Create a second queue, and start processing. Job set to processing on first queue
+        /// should be rescheduled as it is in processing state but the related driver active lock
+        /// is not there
+        let jobQueue2 = try await self.createJobQueue(
+            configuration: .init(queueName: #function)
+        )
+        jobQueue2.registerJob(parameters: BarrierJob.self) { parameters, context in
+            cont.yield()
+        }
         await withThrowingTaskGroup(of: Void.self) { group in
             let serviceGroup = ServiceGroup(
                 configuration: .init(
-                    services: [jobQueue.processor(options: .init())],
+                    services: [jobQueue2.queue.valkeyClient, jobQueue2.processor(options: .init())],
                     gracefulShutdownSignals: [.sigterm, .sigint],
                     logger: Logger(label: "JobQueueService")
                 )
@@ -1081,7 +1092,7 @@ struct JobsValkeyTests {
             group.addTask {
                 try await serviceGroup.run()
             }
-            await stream.first { _ in true }
+            _ = await stream.first { _ in true }
             await serviceGroup.triggerGracefulShutdown()
         }
     }
