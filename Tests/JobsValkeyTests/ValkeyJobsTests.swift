@@ -28,12 +28,11 @@ struct JobsValkeyTests {
     static let valkeyHostname = ProcessInfo.processInfo.environment["VALKEY_HOSTNAME"] ?? "127.0.0.1"
 
     func createJobQueue(
-        numWorkers: Int,
         configuration: ValkeyJobQueue.Configuration = .init(),
         function: String = #function
     ) async throws -> JobQueue<ValkeyJobQueue> {
         var logger = Logger(label: function)
-        logger.logLevel = .debug
+        logger.logLevel = .trace
         let valkey = ValkeyClient(.hostname(Self.valkeyHostname, port: 6379), logger: logger)
         return try await JobQueue(
             .valkey(valkey, configuration: configuration, logger: logger),
@@ -49,17 +48,17 @@ struct JobsValkeyTests {
     /// Creates test client, runs test function abd ensures everything is
     /// shutdown correctly
     @discardableResult public func testJobQueue<T>(
-        numWorkers: Int,
+        processingOptions: JobQueueProcessorOptions = .init(numWorkers: 1),
         configuration: ValkeyJobQueue.Configuration,
         failedJobsInitialization: ValkeyJobQueue.JobCleanup = .remove,
         test: (JobQueue<ValkeyJobQueue>) async throws -> T,
         function: String = #function
     ) async throws -> T {
-        let jobQueue = try await createJobQueue(numWorkers: numWorkers, configuration: configuration, function: function)
+        let jobQueue = try await createJobQueue(configuration: configuration, function: function)
         return try await withThrowingTaskGroup(of: Void.self) { group in
             let serviceGroup = ServiceGroup(
                 configuration: .init(
-                    services: [jobQueue.queue.valkeyClient, jobQueue.processor(options: .init(numWorkers: numWorkers))],
+                    services: [jobQueue.queue.valkeyClient, jobQueue.processor(options: processingOptions)],
                     gracefulShutdownSignals: [.sigterm, .sigint],
                     logger: Logger(label: "JobQueueService")
                 )
@@ -80,7 +79,7 @@ struct JobsValkeyTests {
             let value: Int
         }
         let expectation = TestExpectation()
-        try await self.testJobQueue(numWorkers: 1, configuration: .init(queueName: #function)) { jobQueue in
+        try await self.testJobQueue(configuration: .init(queueName: #function)) { jobQueue in
             jobQueue.registerJob(parameters: TestParameters.self) { parameters, context in
                 context.logger.info("Parameters=\(parameters)")
                 try await Task.sleep(for: .milliseconds(Int.random(in: 10..<50)))
@@ -110,7 +109,7 @@ struct JobsValkeyTests {
         let maxRunningJobCounter = Atomic(0)
         let expectation = TestExpectation()
 
-        try await self.testJobQueue(numWorkers: 4, configuration: .init(queueName: #function)) { jobQueue in
+        try await self.testJobQueue(processingOptions: .init(numWorkers: 4), configuration: .init(queueName: #function)) { jobQueue in
             jobQueue.registerJob(parameters: TestParameters.self) { parameters, context in
                 let runningJobs = runningJobCounter.wrappingAdd(1, ordering: .relaxed).newValue
                 if runningJobs > maxRunningJobCounter.load(ordering: .relaxed) {
@@ -147,7 +146,7 @@ struct JobsValkeyTests {
         }
         let expectation = TestExpectation()
         let jobExecutionSequence: Mutex<[Int]> = .init([])
-        try await self.testJobQueue(numWorkers: 1, configuration: .init(queueName: #function)) { jobQueue in
+        try await self.testJobQueue(configuration: .init(queueName: #function)) { jobQueue in
             jobQueue.registerJob(parameters: TestParameters.self) { parameters, _ in
                 jobExecutionSequence.withLock {
                     $0.append(parameters.value)
@@ -173,7 +172,7 @@ struct JobsValkeyTests {
             static let jobName = "testDelayedJobDoesntRun"
         }
         let jobQueue = try await self.createJobQueue(
-            numWorkers: 1,
+
             configuration: .init(queueName: #function, retentionPolicy: .init(cancelledJobs: .retain))
         )
         try await withThrowingTaskGroup(of: Void.self) { group in
@@ -202,7 +201,7 @@ struct JobsValkeyTests {
         }
         let expectation = TestExpectation()
         struct FailedError: Error {}
-        try await self.testJobQueue(numWorkers: 1, configuration: .init(queueName: #function)) { jobQueue in
+        try await self.testJobQueue(configuration: .init(queueName: #function)) { jobQueue in
             jobQueue.registerJob(
                 parameters: TestParameters.self,
                 retryStrategy: .exponentialJitter(maxAttempts: 3, maxBackoff: .milliseconds(100))
@@ -237,7 +236,7 @@ struct JobsValkeyTests {
         let expectation = TestExpectation()
         let currentJobTryCount: Mutex<Int> = .init(0)
         struct FailedError: Error {}
-        try await self.testJobQueue(numWorkers: 1, configuration: .init(queueName: #function)) { jobQueue in
+        try await self.testJobQueue(configuration: .init(queueName: #function)) { jobQueue in
             jobQueue.registerJob(
                 parameters: TestParameters.self,
                 retryStrategy: .exponentialJitter(maxAttempts: 3, maxBackoff: .milliseconds(100))
@@ -276,7 +275,7 @@ struct JobsValkeyTests {
             let message: String
         }
         let expectation = TestExpectation()
-        try await self.testJobQueue(numWorkers: 1, configuration: .init(queueName: #function)) { jobQueue in
+        try await self.testJobQueue(configuration: .init(queueName: #function)) { jobQueue in
             jobQueue.registerJob(parameters: TestJobParameters.self) { parameters, _ in
                 #expect(parameters.id == 23)
                 #expect(parameters.message == "Hello!")
@@ -297,7 +296,7 @@ struct JobsValkeyTests {
         var logger = Logger(label: #function)
         logger.logLevel = .trace
 
-        try await self.testJobQueue(numWorkers: 4, configuration: .init(queueName: #function)) { jobQueue in
+        try await self.testJobQueue(processingOptions: .init(numWorkers: 4), configuration: .init(queueName: #function)) { jobQueue in
             jobQueue.registerJob(parameters: TestParameters.self) { _, _ in
                 expectation.trigger()
                 try await Task.sleep(for: .milliseconds(1000))
@@ -326,7 +325,7 @@ struct JobsValkeyTests {
         let string: Mutex<String> = .init("")
         let expectation = TestExpectation()
 
-        try await self.testJobQueue(numWorkers: 4, configuration: .init(queueName: #function)) { jobQueue in
+        try await self.testJobQueue(processingOptions: .init(numWorkers: 4), configuration: .init(queueName: #function)) { jobQueue in
             jobQueue.registerJob(parameters: TestStringParameter.self) { parameters, _ in
                 string.withLock { $0 = parameters.value }
                 expectation.trigger()
@@ -361,7 +360,7 @@ struct JobsValkeyTests {
             succeededExpectation.trigger()
             finished.store(true, ordering: .relaxed)
         }
-        try await self.testJobQueue(numWorkers: 4, configuration: .init(queueName: #function)) { jobQueue in
+        try await self.testJobQueue(processingOptions: .init(numWorkers: 4), configuration: .init(queueName: #function)) { jobQueue in
             jobQueue.registerJob(job)
 
             try await jobQueue.push(TestParameters())
@@ -375,7 +374,11 @@ struct JobsValkeyTests {
         #expect(firstTime.load(ordering: .relaxed) == false)
         #expect(finished.load(ordering: .relaxed) == false)
 
-        try await self.testJobQueue(numWorkers: 4, configuration: .init(queueName: #function), failedJobsInitialization: .rerun) { jobQueue in
+        try await self.testJobQueue(
+            processingOptions: .init(numWorkers: 4),
+            configuration: .init(queueName: #function),
+            failedJobsInitialization: .rerun
+        ) { jobQueue in
             jobQueue.registerJob(job)
             try await succeededExpectation.wait()
         }
@@ -395,7 +398,7 @@ struct JobsValkeyTests {
             failedExpectation.trigger()
             throw RetryError()
         }
-        try await self.testJobQueue(numWorkers: 4, configuration: .init(queueName: #function)) { jobQueue in
+        try await self.testJobQueue(processingOptions: .init(numWorkers: 4), configuration: .init(queueName: #function)) { jobQueue in
             jobQueue.registerJob(job)
 
             try await jobQueue.push(TestParameters())
@@ -406,7 +409,11 @@ struct JobsValkeyTests {
             try await Task.sleep(for: .milliseconds(50))
         }
 
-        try await self.testJobQueue(numWorkers: 4, configuration: .init(queueName: #function), failedJobsInitialization: .remove) { jobQueue in
+        try await self.testJobQueue(
+            processingOptions: .init(numWorkers: 4),
+            configuration: .init(queueName: #function),
+            failedJobsInitialization: .remove
+        ) { jobQueue in
             jobQueue.registerJob(job)
         }
     }
@@ -474,7 +481,7 @@ struct JobsValkeyTests {
             let value: Int
         }
         let expectation = TestExpectation()
-        try await self.testJobQueue(numWorkers: 1, configuration: .init(queueName: #function)) { jobQueue in
+        try await self.testJobQueue(configuration: .init(queueName: #function)) { jobQueue in
             jobQueue.registerJob(parameters: TestParameters.self) { parameters, context in
                 context.logger.info("Parameters=\(parameters)")
                 _ = try await jobQueue.queue.valkeyClient.scriptFlush(flushType: .sync)
@@ -602,7 +609,7 @@ struct JobsValkeyTests {
         }
         let expectation = TestExpectation()
         try await self.testJobQueue(
-            numWorkers: 1,
+
             configuration: .init(
                 queueName: #function,
                 retentionPolicy: .init(completedJobs: .retain)
@@ -649,7 +656,7 @@ struct JobsValkeyTests {
 
     @Test func testCancelledJobRetention() async throws {
         let jobQueue = try await self.createJobQueue(
-            numWorkers: 1,
+
             configuration: .init(retentionPolicy: .init(cancelledJobs: .retain))
         )
         let jobName = JobName<Int>("testCancelledJobRetention")
@@ -693,7 +700,7 @@ struct JobsValkeyTests {
     }
 
     @Test func testPausedJobRetention() async throws {
-        let jobQueue = try await self.createJobQueue(numWorkers: 1)
+        let jobQueue = try await self.createJobQueue()
         let jobName = JobName<Int>("testPausedJobRetention")
         jobQueue.registerJob(name: jobName) { _, _ in }
 
@@ -736,7 +743,7 @@ struct JobsValkeyTests {
 
     @Test func testCancelledJobRerun() async throws {
         let jobQueue = try await self.createJobQueue(
-            numWorkers: 1,
+
             configuration: .init(queueName: #function, retentionPolicy: .init(cancelledJobs: .retain))
         )
         let jobName = JobName<Int>("testCancelledJobRetention")
@@ -795,7 +802,7 @@ struct JobsValkeyTests {
 
     @Test func testCleanupProcessingJobs() async throws {
         let jobQueue = try await self.createJobQueue(
-            numWorkers: 1,
+
             configuration: .init(queueName: #function, retentionPolicy: .init(cancelledJobs: .retain))
         )
         let jobName = JobName<Int>("testCancelledJobRetention")
@@ -834,7 +841,6 @@ struct JobsValkeyTests {
 
     @Test func testRerunProcessingJobs() async throws {
         let jobQueue = try await self.createJobQueue(
-            numWorkers: 1,
             configuration: .init(queueName: #function, retentionPolicy: .init(cancelledJobs: .retain))
         )
         let jobName = JobName<Int>("testCancelledJobRetention")
@@ -881,14 +887,12 @@ struct JobsValkeyTests {
 
     @Test func testCleanupJob() async throws {
         try await self.testJobQueue(
-            numWorkers: 1,
             configuration: .init(
                 queueName: "testCleanupJob",
                 retentionPolicy: .init(failedJobs: .retain)
             )
         ) { jobQueue in
             try await self.testJobQueue(
-                numWorkers: 1,
                 configuration: .init(
                     queueName: "testCleanupJob2",
                     retentionPolicy: .init(failedJobs: .retain)
@@ -971,8 +975,8 @@ struct JobsValkeyTests {
     }
 
     @Test func testMultipleQueueMetadata() async throws {
-        try await self.testJobQueue(numWorkers: 1, configuration: .init(queueName: "testMultipleQueueMetadata")) { jobQueue1 in
-            try await self.testJobQueue(numWorkers: 1, configuration: .init(queueName: "testMultipleQueueMetadata2")) { jobQueue2 in
+        try await self.testJobQueue(configuration: .init(queueName: "testMultipleQueueMetadata")) { jobQueue1 in
+            try await self.testJobQueue(configuration: .init(queueName: "testMultipleQueueMetadata2")) { jobQueue2 in
                 try await jobQueue1.queue.setMetadata(key: "test", value: .init(string: "queue1"))
                 try await jobQueue2.queue.setMetadata(key: "test", value: .init(string: "queue2"))
                 let value1 = try await jobQueue1.queue.getMetadata("test")
@@ -984,7 +988,7 @@ struct JobsValkeyTests {
     }
 
     @Test func testMetadataLock() async throws {
-        try await self.testJobQueue(numWorkers: 1, configuration: .init(queueName: #function)) { jobQueue in
+        try await self.testJobQueue(configuration: .init(queueName: #function)) { jobQueue in
             // 1 - acquire lock
             var result = try await jobQueue.queue.acquireLock(key: "lock", id: .init(string: "one"), expiresIn: 10)
             #expect(result == true)
@@ -1014,8 +1018,8 @@ struct JobsValkeyTests {
     }
 
     @Test func testMultipleQueueMetadataLock() async throws {
-        try await self.testJobQueue(numWorkers: 1, configuration: .init(queueName: "testMultipleQueueMetadataLock1")) { jobQueue1 in
-            try await self.testJobQueue(numWorkers: 1, configuration: .init(queueName: "testMultipleQueueMetadataLock2")) { jobQueue2 in
+        try await self.testJobQueue(configuration: .init(queueName: "testMultipleQueueMetadataLock1")) { jobQueue1 in
+            try await self.testJobQueue(configuration: .init(queueName: "testMultipleQueueMetadataLock2")) { jobQueue2 in
                 let result1 = try await jobQueue1.queue.acquireLock(
                     key: "testMultipleQueueMetadataLock",
                     id: .init(string: "queue1"),
@@ -1047,5 +1051,49 @@ struct JobsValkeyTests {
 
         // 3 - Verify
         #expect(id == decodedId)
+    }
+
+    @Test func testCleanupHungProcessingJobs() async throws {
+        // Create queue, add job to it and push onto processing queue
+        let jobQueue = try await self.createJobQueue(
+            configuration: .init(queueName: #function)
+        )
+        async let _ = jobQueue.queue.valkeyClient.run()
+        let (stream, cont) = AsyncStream.makeStream(of: Void.self)
+        struct BarrierJob: JobParameters {
+            static var jobName: String { "barrier" }
+        }
+        jobQueue.registerJob(parameters: BarrierJob.self) { parameters, context in
+            cont.yield()
+        }
+        try await jobQueue.queue.waitUntilReady()
+        try await jobQueue.push(BarrierJob())
+        // push job onto processing queue
+        let jobIterator = jobQueue.queue.makeAsyncIterator()
+        _ = try #require(try await jobIterator.next())
+
+        /// Create a second queue, and start processing. Job set to processing on first queue
+        /// should be rescheduled as it is in processing state but the related driver active lock
+        /// is not there
+        let jobQueue2 = try await self.createJobQueue(
+            configuration: .init(queueName: #function)
+        )
+        jobQueue2.registerJob(parameters: BarrierJob.self) { parameters, context in
+            cont.yield()
+        }
+        await withThrowingTaskGroup(of: Void.self) { group in
+            let serviceGroup = ServiceGroup(
+                configuration: .init(
+                    services: [jobQueue2.queue.valkeyClient, jobQueue2.processor(options: .init())],
+                    gracefulShutdownSignals: [.sigterm, .sigint],
+                    logger: Logger(label: "JobQueueService")
+                )
+            )
+            group.addTask {
+                try await serviceGroup.run()
+            }
+            _ = await stream.first { _ in true }
+            await serviceGroup.triggerGracefulShutdown()
+        }
     }
 }
