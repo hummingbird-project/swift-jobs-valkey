@@ -43,7 +43,7 @@ public final class ValkeyJobQueue: JobQueueDriver {
             self.value = String(buffer: buffer)
         }
 
-        public init(_ token: RESPToken) throws {
+        public init(_ token: RESPToken) throws(RESPDecodeError) {
             self.value = try String(token)
         }
 
@@ -171,8 +171,21 @@ public final class ValkeyJobQueue: JobQueueDriver {
     @inlinable
     public func retry<Parameters>(_ id: JobID, jobRequest: JobRequest<Parameters>, options: JobRetryOptions) async throws {
         let options = JobOptions(delayUntil: options.delayUntil)
-        try await self.finished(jobID: id)
-        try await self.push(jobID: id, jobRequest: jobRequest, options: options)
+        let buffer = try self.jobRegistry.encode(jobRequest: jobRequest)
+        _ = try await self.valkeyClient.execute(
+            LREM(self.configuration.processingQueueKey, count: 0, element: id),
+            DEL(keys: [id.valkeyMetadataKey(for: self)]),
+            SET(id.valkeyKey(for: self), value: buffer),
+            ZADD(
+                self.configuration.pendingQueueKey,
+                data: [
+                    .init(
+                        score: options.delayUntil.timeIntervalSince1970,
+                        member: id.description
+                    )
+                ]
+            )
+        ).3.get()
     }
 
     /// Helper for enqueuing jobs
@@ -280,6 +293,7 @@ public final class ValkeyJobQueue: JobQueueDriver {
         _ = try await self.valkeyClient.del(keys: jobIDs.flatMap { [$0.valkeyKey(for: self), $0.valkeyMetadataKey(for: self)] })
     }
 
+    @usableFromInline
     let jobRegistry: JobRegistry
 }
 
