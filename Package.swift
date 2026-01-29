@@ -10,7 +10,7 @@ let package = Package(
         .library(name: "JobsValkey", targets: ["JobsValkey"])
     ],
     dependencies: [
-        .package(url: "https://github.com/hummingbird-project/swift-jobs.git", branch: "jobqueue-name"),
+        .package(url: "https://github.com/hummingbird-project/swift-jobs.git", branch: "main"),
         .package(url: "https://github.com/valkey-io/valkey-swift", from: "1.0.0-alpha.1"),
     ],
     targets: [
