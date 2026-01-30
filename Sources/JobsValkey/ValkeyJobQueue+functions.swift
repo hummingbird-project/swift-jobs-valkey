@@ -41,20 +41,33 @@ extension ValkeyJobQueue {
                     #!lua name=_swift_jobs_valkey
 
                     local function version()
-                        return 1
+                        return 24
                     end
 
                     local function pop(keys, args)
-                        local values = redis.call("ZPOPMIN", keys[1])
+                        local values = redis.call("ZPOPMIN", keys[1], args[1])
                         if #(values) == 0 then 
                             return nil
                         end
-                        if tonumber(values[2]) > tonumber(args[1]) then
-                            redis.call("ZADD", keys[1], values[2], values[1])
+                        local readyJobs = {}
+                        local delayedJobs = {}
+                        for i = 1,#(values),2 do
+                            if tonumber(values[2]) > tonumber(args[2]) then
+                                table.insert(delayedJobs, values[i+1])
+                                table.insert(delayedJobs, values[i])
+                            else
+                                table.insert(readyJobs, values[i])
+                            end
+                        end
+                        if #(delayedJobs) > 0 then
+                            redis.call("ZADD", keys[1], unpack(delayedJobs))
+                        end
+                        if #(readyJobs) > 0 then
+                            redis.call("LPUSH", keys[2], unpack(readyJobs))
+                            return readyJobs
+                        else
                             return nil
                         end
-                        redis.call("LPUSH", keys[2], values[1])
-                        return values[1]
                     end
 
                     local function cancel(keys, args)

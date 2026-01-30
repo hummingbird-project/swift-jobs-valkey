@@ -178,10 +178,11 @@ struct JobsValkeyTests {
                 TestParameters(),
                 options: .init(delayUntil: Date.now.addingTimeInterval(5))
             )
-            let job = try await jobQueue.queue.popFirst()
-            #expect(job == nil)
-            let job2 = try await jobQueue.queue.popFirst()
-            #expect(job2 == nil)
+            try await jobQueue.push(TestParameters())
+            let job = try await jobQueue.queue.popFirst(count: 1)
+            #expect(job.count == 1)
+            let job2 = try await jobQueue.queue.popFirst(count: 1)
+            #expect(job2.count == 0)
 
             try await jobQueue.queue.cleanup(pendingJobs: .remove)
 
@@ -814,10 +815,10 @@ struct JobsValkeyTests {
                 cancelledJobs: .remove
             )
             let jobID = try await jobQueue.push(jobName, parameters: 1)
-            let job = try await jobQueue.queue.popFirst()
-            #expect(jobID == job?.id)
+            let job = try await jobQueue.queue.popFirst(count: 1)
+            #expect(jobID == job[0].id)
             _ = try await jobQueue.push(jobName, parameters: 1)
-            _ = try await jobQueue.queue.popFirst()
+            _ = try await jobQueue.queue.popFirst(count: 1)
 
             var processingJobs = try await jobQueue.queue.valkeyClient.llen(jobQueue.queue.configuration.processingQueueKey)
             #expect(processingJobs == 2)
@@ -852,10 +853,10 @@ struct JobsValkeyTests {
                 cancelledJobs: .remove
             )
             let jobID = try await jobQueue.push(jobName, parameters: 1)
-            let job = try await jobQueue.queue.popFirst()
-            #expect(jobID == job?.id)
+            let job = try await jobQueue.queue.popFirst(count: 1)
+            #expect(jobID == job[0].id)
             _ = try await jobQueue.push(jobName, parameters: 1)
-            _ = try await jobQueue.queue.popFirst()
+            _ = try await jobQueue.queue.popFirst(count: 1)
 
             var processingJobs = try await jobQueue.queue.valkeyClient.llen(jobQueue.queue.configuration.processingQueueKey)
             #expect(processingJobs == 2)
@@ -1063,7 +1064,7 @@ struct JobsValkeyTests {
         try await jobQueue.queue.waitUntilReady()
         try await jobQueue.push(BarrierJob())
         // push job onto processing queue
-        let jobIterator = jobQueue.queue.makeAsyncIterator()
+        var jobIterator = jobQueue.queue.makeAsyncIterator()
         _ = try #require(try await jobIterator.next())
 
         /// Create a second queue, and start processing. Job set to processing on first queue
