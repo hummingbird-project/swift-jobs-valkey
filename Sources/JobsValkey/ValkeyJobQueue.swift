@@ -112,7 +112,7 @@ public final class ValkeyJobQueue: JobQueueDriver {
     let isStopped: Atomic<Bool>
     @usableFromInline
     let logger: Logger
-    public let workerContext: JobWorkerContext
+    public let context: JobQueueContext
 
     let loadFunctions: AsyncInitializedGlobal<Void>
 
@@ -128,7 +128,7 @@ public final class ValkeyJobQueue: JobQueueDriver {
         self.jobRegistry = .init()
         self.logger = logger
         self.loadFunctions = .init()
-        self.workerContext = JobWorkerContext(id: UUID().uuidString, metadata: [:])
+        self.context = JobQueueContext(workerID: UUID().uuidString, queueName: configuration.queueName, metadata: [:])
         self.registerCleanupJob()
     }
 
@@ -272,7 +272,7 @@ public final class ValkeyJobQueue: JobQueueDriver {
                 HMSET(
                     jobID.valkeyMetadataKey(for: self),
                     data: [
-                        .init(field: Self.workerIDMetaDataKey, value: self.workerContext.id),
+                        .init(field: Self.workerIDMetaDataKey, value: self.context.workerID),
                         .init(field: Self.processingStartedMetaDataKey, value: "\(Date.now.timeIntervalSince1970)"),
                     ]
                 )
