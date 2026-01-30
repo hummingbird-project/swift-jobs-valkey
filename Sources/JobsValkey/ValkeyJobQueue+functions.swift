@@ -41,7 +41,7 @@ extension ValkeyJobQueue {
                     #!lua name=_swift_jobs_valkey
 
                     local function version()
-                        return 24
+                        return 2
                     end
 
                     local function pop(keys, args)

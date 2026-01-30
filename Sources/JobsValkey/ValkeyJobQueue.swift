@@ -265,7 +265,6 @@ public final class ValkeyJobQueue: JobQueueDriver {
         guard let jobIDs = try? values.decode(as: [JobID].self) else {
             return []
         }
-        self.logger.info("JobIDs \(jobIDs)")
         var commands: [any ValkeyCommand] = []
         for jobID in jobIDs {
             commands.append(GET(jobID.valkeyKey(for: self)))
@@ -393,7 +392,7 @@ extension ValkeyJobQueue {
                 if self.queue.isStopped.load(ordering: .relaxed) {
                     return nil
                 }
-                let jobs = try await queue.popFirst(count: 4)
+                let jobs = try await queue.popFirst(count: self.queue.configuration.maxJobsPoppedFromPendingQueue)
                 if let job = jobs.first {
                     let remainingJobs = jobs.dropFirst()
                     if remainingJobs.count > 0 {

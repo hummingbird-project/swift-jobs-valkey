@@ -426,7 +426,7 @@ struct JobsValkeyTests {
         }()
         let job = JobDefinition(parameters: TestParameters.self) { parameters, context in
             context.logger.info("Parameters=\(parameters.value)")
-            try await Task.sleep(for: .milliseconds(Int.random(in: 10..<50)))
+            try await Task.sleep(for: .microseconds(Int.random(in: 10..<50)))
             expectation.trigger()
         }
         let valkey = ValkeyClient(.hostname(Self.valkeyHostname, port: 6379), logger: logger)
@@ -457,10 +457,10 @@ struct JobsValkeyTests {
                 try await serviceGroup.run()
             }
             do {
-                for i in 0..<200 {
+                for i in 0..<2000 {
                     try await jobQueue.push(TestParameters(value: i))
                 }
-                try await expectation.wait(count: 200)
+                try await expectation.wait(count: 2000)
                 await serviceGroup.triggerGracefulShutdown()
             } catch {
                 Issue.record("\(String(reflecting: error))")
