@@ -11,7 +11,7 @@ import NIOCore
 import Valkey
 
 extension ValkeyJobQueue {
-    static let FunctionVersion = 1
+    static let FunctionVersion = 2
     /// Upload Valkey JobQueue lua functions to server.
     ///
     /// This includes functions
@@ -41,6 +41,7 @@ extension ValkeyJobQueue {
                     #!lua name=_swift_jobs_valkey
 
                     local function version()
+                        -- update this at the top of the file
                         return 2
                     end
 
