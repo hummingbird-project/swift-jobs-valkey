@@ -20,53 +20,7 @@ import Foundation
 
 /// Valkey implementation of job queue driver
 public final class ValkeyJobQueue: JobQueueDriver {
-    public struct JobID: Sendable, CustomStringConvertible, Equatable, Codable, RESPStringRenderable, RESPTokenDecodable {
-        @usableFromInline
-        let value: String
-
-        @usableFromInline
-        init() {
-            self.value = UUID().uuidString
-        }
-
-        init(value: String) {
-            self.value = value
-        }
-
-        init(buffer: ByteBuffer) {
-            self.value = String(buffer: buffer)
-        }
-
-        public init(_ token: RESPToken) throws(RESPDecodeError) {
-            self.value = try String(token)
-        }
-
-        public var respEntries: Int { 1 }
-
-        public func encode(into commandEncoder: inout ValkeyCommandEncoder) {
-            self.value.encode(into: &commandEncoder)
-        }
-
-        @inlinable
-        func valkeyKey(for queue: ValkeyJobQueue) -> ValkeyKey { .init("\(queue.configuration.queueName)/\(self.value)") }
-        @inlinable
-        func valkeyMetadataKey(for queue: ValkeyJobQueue) -> ValkeyKey { .init("\(queue.configuration.queueName)/\(self.value).metadata") }
-
-        /// String description of Identifier
-        public var description: String {
-            self.value
-        }
-
-        public init(from decoder: any Decoder) throws {
-            let container = try decoder.singleValueContainer()
-            self.value = try container.decode(String.self)
-        }
-
-        public func encode(to encoder: any Encoder) throws {
-            var container = encoder.singleValueContainer()
-            try container.encode(value)
-        }
-    }
+    public typealias JobID = UUID
 
     /// Options for job pushed to queue
     public struct JobOptions: JobOptionsProtocol {
@@ -167,7 +121,7 @@ public final class ValkeyJobQueue: JobQueueDriver {
         let options = JobOptions(delayUntil: options.delayUntil)
         let buffer = try self.jobRegistry.encode(jobRequest: jobRequest)
         _ = try await self.valkeyClient.execute(
-            LREM(self.configuration.processingQueueKey, count: 0, element: id),
+            LREM(self.configuration.processingQueueKey, count: 0, element: id.uuidString),
             DEL(keys: [id.valkeyMetadataKey(for: self)]),
             SET(id.valkeyKey(for: self), value: buffer),
             ZADD(
@@ -209,12 +163,12 @@ public final class ValkeyJobQueue: JobQueueDriver {
     public func finished(jobID: JobID) async throws {
         if self.configuration.retentionPolicy.completedJobs == .retain {
             _ = try await self.valkeyClient.execute(
-                LREM(self.configuration.processingQueueKey, count: 0, element: jobID),
-                ZADD(self.configuration.completedQueueKey, data: [.init(score: Date.now.timeIntervalSince1970, member: jobID)])
+                LREM(self.configuration.processingQueueKey, count: 0, element: jobID.uuidString),
+                ZADD(self.configuration.completedQueueKey, data: [.init(score: Date.now.timeIntervalSince1970, member: jobID.uuidString)])
             ).1.get()
         } else {
             _ = try await self.valkeyClient.execute(
-                LREM(self.configuration.processingQueueKey, count: 0, element: jobID),
+                LREM(self.configuration.processingQueueKey, count: 0, element: jobID.uuidString),
                 DEL(keys: [jobID.valkeyKey(for: self), jobID.valkeyMetadataKey(for: self)])
             ).1.get()
         }
@@ -229,12 +183,12 @@ public final class ValkeyJobQueue: JobQueueDriver {
     public func failed(jobID: JobID, error: Error) async throws {
         if self.configuration.retentionPolicy.failedJobs == .retain {
             _ = try await self.valkeyClient.execute(
-                LREM(self.configuration.processingQueueKey, count: 0, element: jobID),
-                ZADD(self.configuration.failedQueueKey, data: [.init(score: Date.now.timeIntervalSince1970, member: jobID)])
+                LREM(self.configuration.processingQueueKey, count: 0, element: jobID.uuidString),
+                ZADD(self.configuration.failedQueueKey, data: [.init(score: Date.now.timeIntervalSince1970, member: jobID.uuidString)])
             ).1.get()
         } else {
             _ = try await self.valkeyClient.execute(
-                LREM(self.configuration.processingQueueKey, count: 0, element: jobID),
+                LREM(self.configuration.processingQueueKey, count: 0, element: jobID.uuidString),
                 DEL(keys: [jobID.valkeyKey(for: self), jobID.valkeyMetadataKey(for: self)])
             ).1.get()
         }
@@ -256,7 +210,7 @@ public final class ValkeyJobQueue: JobQueueDriver {
             keys: [self.configuration.pendingQueueKey, self.configuration.processingQueueKey],
             args: ["\(Date.now.timeIntervalSince1970)"]
         )
-        guard let jobID = try? value.decode(as: JobID.self) else {
+        guard let jobID = try? UUID(uuidString: value.decode(as: String.self)) else {
             return nil
         }
 
@@ -393,7 +347,7 @@ extension ValkeyJobQueue: CancellableJobQueue {
             )
         } else {
             _ = try await self.valkeyClient.execute(
-                ZREM(self.configuration.pendingQueueKey, members: [jobID]),
+                ZREM(self.configuration.pendingQueueKey, members: [jobID.uuidString]),
                 DEL(keys: [jobID.valkeyKey(for: self), jobID.valkeyMetadataKey(for: self)])
             ).1.get()
         }
@@ -443,4 +397,18 @@ extension JobQueueDriver where Self == ValkeyJobQueue {
     ) async throws -> Self {
         try await .init(valkeyClient, configuration: configuration, logger: logger)
     }
+}
+
+extension UUID {
+    @inlinable
+    func valkeyKey(for queue: ValkeyJobQueue) -> ValkeyKey { .init("\(queue.configuration.queueName)/\(self.uuidString)") }
+    @inlinable
+    func valkeyMetadataKey(for queue: ValkeyJobQueue) -> ValkeyKey { .init("\(queue.configuration.queueName)/\(self.uuidString).metadata") }
+}
+
+extension String {
+    @inlinable
+    func valkeyKey(for queue: ValkeyJobQueue) -> ValkeyKey { .init("\(queue.configuration.queueName)/\(self)") }
+    @inlinable
+    func valkeyMetadataKey(for queue: ValkeyJobQueue) -> ValkeyKey { .init("\(queue.configuration.queueName)/\(self).metadata") }
 }
