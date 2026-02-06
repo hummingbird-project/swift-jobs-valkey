@@ -32,11 +32,14 @@ extension ValkeyJobQueue {
         public let pollTime: Duration
         /// Retention policy for jobs
         public let retentionPolicy: RetentionPolicy
+        /// Maximum number of jobs to pop off pending queue at one time. This value should not be greater than the number of workers
+        public let maxJobsPoppedFromPendingQueue: Int
 
         public init(
             queueName: String = "_hbJobQueue",
             pollTime: Duration = .milliseconds(100),
-            retentionPolicy: RetentionPolicy = .init()
+            retentionPolicy: RetentionPolicy = .init(),
+            maxJobsPoppedFromPendingQueue: Int = 8
         ) {
             self.queueName = queueName
             self.pendingQueueKey = ValkeyKey("\(queueName).pending")
@@ -48,6 +51,7 @@ extension ValkeyJobQueue {
             self.metadataKeyPrefix = "\(queueName).metadata."
             self.pollTime = pollTime
             self.retentionPolicy = retentionPolicy
+            self.maxJobsPoppedFromPendingQueue = maxJobsPoppedFromPendingQueue
         }
     }
 }
