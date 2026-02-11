@@ -3,8 +3,6 @@ name: Swift nightly build
 on:
   workflow_dispatch:
 
-env:
-  VALKEY_HOSTNAME: valkey
 jobs:
   linux:
     runs-on: ubuntu-latest
@@ -21,6 +19,8 @@ jobs:
           - 6379:6379
         options: --entrypoint valkey-server
 
+    env:
+      VALKEY_HOSTNAME: valkey
     steps:
     - name: Checkout
       uses: actions/checkout@v6
