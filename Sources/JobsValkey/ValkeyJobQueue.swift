@@ -6,6 +6,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+import DequeModule
 import Jobs
 import Logging
 import NIOCore
@@ -133,8 +134,13 @@ public final class ValkeyJobQueue: JobQueueDriver {
 
     /// Initialize loading of functions and wait until it has finished
     public func waitUntilReady() async throws {
-        try await self.loadFunctions()
-        try await self.cleanupProcessingJobs(maxJobsToProcess: .max)
+        do {
+            try await self.loadFunctions()
+            try await self.cleanupProcessingJobs(maxJobsToProcess: .max)
+        } catch {
+            print(error)
+            throw error
+        }
     }
 
     ///  Register job
@@ -250,33 +256,46 @@ public final class ValkeyJobQueue: JobQueueDriver {
     /// - Parameter eventLoop: eventLoop to do work on
     /// - Returns: queued job
     @usableFromInline
-    func popFirst() async throws -> JobQueueResult<JobID>? {
-        let value = try await self.valkeyClient.fcall(
+    func popFirst(count: Int) async throws -> [JobQueueResult<JobID>] {
+        let values = try await self.valkeyClient.fcall(
             function: "swiftjobs_pop",
             keys: [self.configuration.pendingQueueKey, self.configuration.processingQueueKey],
-            args: ["\(Date.now.timeIntervalSince1970)"]
+            args: [String(count), "\(Date.now.timeIntervalSince1970)"]
         )
-        guard let jobID = try? value.decode(as: JobID.self) else {
-            return nil
+        guard let jobIDs = try? values.decode(as: [JobID].self) else {
+            return []
         }
-
-        if let buffer = try await self.get(jobID: jobID) {
-            do {
-                let jobInstance = try self.jobRegistry.decode(buffer)
-                try await self.valkeyClient.hmset(
+        var commands: [any ValkeyCommand] = []
+        for jobID in jobIDs {
+            commands.append(GET(jobID.valkeyKey(for: self)))
+            commands.append(
+                HMSET(
                     jobID.valkeyMetadataKey(for: self),
                     data: [
                         .init(field: Self.workerIDMetaDataKey, value: self.context.workerID),
                         .init(field: Self.processingStartedMetaDataKey, value: "\(Date.now.timeIntervalSince1970)"),
                     ]
                 )
-                return .init(id: jobID, result: .success(jobInstance))
-            } catch let error as JobQueueError {
-                return .init(id: jobID, result: .failure(error))
-            }
-        } else {
-            return .init(id: jobID, result: .failure(JobQueueError(code: .unrecognisedJobId, jobName: nil)))
+            )
         }
+        let results = await self.valkeyClient.execute(commands)
+        var response: [JobQueueResult<JobID>] = []
+        response.reserveCapacity(jobIDs.count)
+        precondition(results.count == jobIDs.count * 2, "Unexpected number of results from pipelined commands")
+        for index in 0..<jobIDs.count {
+            let jobID = jobIDs[index]
+            if let buffer = try results[index * 2].get().decode(as: ByteBuffer?.self) {
+                do {
+                    let jobInstance = try self.jobRegistry.decode(buffer)
+                    response.append(.init(id: jobID, result: .success(jobInstance)))
+                } catch let error as JobQueueError {
+                    response.append(.init(id: jobID, result: .failure(error)))
+                }
+            } else {
+                response.append(.init(id: jobID, result: .failure(JobQueueError(code: .unrecognisedJobId, jobName: nil))))
+            }
+        }
+        return response
     }
 
     func get(jobID: JobID) async throws -> ByteBuffer? {
@@ -356,14 +375,29 @@ extension ValkeyJobQueue {
     public struct AsyncIterator: AsyncIteratorProtocol {
         @usableFromInline
         let queue: ValkeyJobQueue
+        @usableFromInline
+        var cache: Deque<JobQueueResult<JobID>>
+
+        init(queue: ValkeyJobQueue) {
+            self.queue = queue
+            self.cache = .init()
+        }
 
         @inlinable
-        public func next() async throws -> Element? {
+        mutating public func next() async throws -> Element? {
             while true {
+                if let job = cache.popFirst() {
+                    return job
+                }
                 if self.queue.isStopped.load(ordering: .relaxed) {
                     return nil
                 }
-                if let job = try await queue.popFirst() {
+                let jobs = try await queue.popFirst(count: self.queue.configuration.maxJobsPoppedFromPendingQueue)
+                if let job = jobs.first {
+                    let remainingJobs = jobs.dropFirst()
+                    if remainingJobs.count > 0 {
+                        self.cache.append(contentsOf: remainingJobs)
+                    }
                     return job
                 }
                 // we only sleep if we didn't receive a job
