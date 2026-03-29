@@ -22,29 +22,28 @@ import Foundation
 public final class ValkeyJobQueue: JobQueueDriver {
     public struct JobID: Sendable, CustomStringConvertible, Equatable, Codable, RESPStringRenderable, RESPTokenDecodable {
         @usableFromInline
-        let value: String
+        let value: UUID
 
         @usableFromInline
         init() {
-            self.value = UUID().uuidString
+            self.value = UUID()
         }
 
-        init(value: String) {
+        init?(uuidString: String) {
+            guard let value = UUID(uuidString: uuidString) else { return nil }
             self.value = value
         }
 
-        init(buffer: ByteBuffer) {
-            self.value = String(buffer: buffer)
-        }
-
         public init(_ token: RESPToken) throws(RESPDecodeError) {
-            self.value = try String(token)
+            let string = try token.decode(as: String.self)
+            guard let uuid = UUID(uuidString: string) else { throw RESPDecodeError(.unexpectedToken, token: token) }
+            self.value = uuid
         }
 
         public var respEntries: Int { 1 }
 
         public func encode(into commandEncoder: inout ValkeyCommandEncoder) {
-            self.value.encode(into: &commandEncoder)
+            self.value.uuidString.encode(into: &commandEncoder)
         }
 
         @inlinable
@@ -54,12 +53,12 @@ public final class ValkeyJobQueue: JobQueueDriver {
 
         /// String description of Identifier
         public var description: String {
-            self.value
+            self.value.uuidString
         }
 
         public init(from decoder: any Decoder) throws {
             let container = try decoder.singleValueContainer()
-            self.value = try container.decode(String.self)
+            self.value = try container.decode(UUID.self)
         }
 
         public func encode(to encoder: any Encoder) throws {

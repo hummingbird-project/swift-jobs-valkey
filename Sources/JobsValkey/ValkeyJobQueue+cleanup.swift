@@ -319,12 +319,12 @@ extension ValkeyJobQueue {
                 // if we broke out of the loop before reaching the end we found a value which shouldnt be
                 // deleted. Delete everything up until that point and add the remaining values back into the
                 // sorted set
-                let jobIDs = values[..<index].map { JobID(buffer: ByteBuffer($0.value)) }
+                let jobIDs = values[..<index].compactMap { JobID(uuidString: String($0.value)) }
                 try await self.delete(jobIDs: jobIDs)
                 _ = try await self.valkeyClient.zadd(key, data: values[index...].map { .init(score: $0.score, member: $0.value) })
             } else {
                 // delete all jobIDs returned by zpopmin
-                let jobIDs = values.map { JobID(buffer: ByteBuffer($0.value)) }
+                let jobIDs = values.compactMap { JobID(uuidString: String($0.value)) }
                 try await self.delete(jobIDs: jobIDs)
             }
         }
