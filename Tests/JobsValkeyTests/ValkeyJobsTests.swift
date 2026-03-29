@@ -651,7 +651,6 @@ struct JobsValkeyTests {
 
     @Test func testCancelledJobRetention() async throws {
         let jobQueue = try await self.createJobQueue(
-
             configuration: .init(retentionPolicy: .init(cancelledJobs: .retain))
         )
         let jobName = JobName<Int>("testCancelledJobRetention")
@@ -741,7 +740,7 @@ struct JobsValkeyTests {
 
             configuration: .init(queueName: #function, retentionPolicy: .init(cancelledJobs: .retain))
         )
-        let jobName = JobName<Int>("testCancelledJobRetention")
+        let jobName = JobName<Int>("testCancelledJobRerun")
         jobQueue.registerJob(name: jobName) { _, _ in }
 
         try await withThrowingTaskGroup(of: Void.self) { group in
@@ -800,7 +799,7 @@ struct JobsValkeyTests {
 
             configuration: .init(queueName: #function, retentionPolicy: .init(cancelledJobs: .retain))
         )
-        let jobName = JobName<Int>("testCancelledJobRetention")
+        let jobName = JobName<Int>("testCleanupProcessingJobs")
         jobQueue.registerJob(name: jobName) { _, _ in }
 
         try await withThrowingTaskGroup(of: Void.self) { group in
@@ -838,7 +837,7 @@ struct JobsValkeyTests {
         let jobQueue = try await self.createJobQueue(
             configuration: .init(queueName: #function, retentionPolicy: .init(cancelledJobs: .retain))
         )
-        let jobName = JobName<Int>("testCancelledJobRetention")
+        let jobName = JobName<Int>("testRerunProcessingJobs")
         jobQueue.registerJob(name: jobName) { _, _ in }
 
         try await withThrowingTaskGroup(of: Void.self) { group in
