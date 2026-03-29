@@ -39,7 +39,7 @@ extension ValkeyJobQueue {
             queueName: String = "_hbJobQueue",
             pollTime: Duration = .milliseconds(100),
             retentionPolicy: RetentionPolicy = .init(),
-            maxJobsPoppedFromPendingQueue: Int = 8
+            maxJobsPoppedFromPendingQueue: Int = 1
         ) {
             self.queueName = queueName
             self.pendingQueueKey = ValkeyKey("\(queueName).pending")
