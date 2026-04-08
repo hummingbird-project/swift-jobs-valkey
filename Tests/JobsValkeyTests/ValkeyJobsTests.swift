@@ -14,6 +14,7 @@ import NIOPosix
 import ServiceLifecycle
 import Synchronization
 import Testing
+import UnixSignals
 import Valkey
 
 @testable import JobsValkey
