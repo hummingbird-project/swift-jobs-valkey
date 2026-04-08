@@ -357,7 +357,7 @@ extension ValkeyJobQueue {
         let queue: ValkeyJobQueue
 
         @inlinable
-        public func next() async throws -> Element? {
+        mutating public func next() async throws -> Element? {
             while true {
                 if self.queue.isStopped.load(ordering: .relaxed) {
                     return nil
