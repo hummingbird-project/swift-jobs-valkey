@@ -7,7 +7,8 @@
 //
 
 import ExtrasBase64
-import Jobs
+public import Jobs
+import Logging
 import NIOCore
 import Valkey
 
