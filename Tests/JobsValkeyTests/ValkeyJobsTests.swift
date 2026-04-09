@@ -14,6 +14,7 @@ import NIOPosix
 import ServiceLifecycle
 import Synchronization
 import Testing
+import UnixSignals
 import Valkey
 
 @testable import JobsValkey
@@ -1063,7 +1064,7 @@ struct JobsValkeyTests {
         try await jobQueue.queue.waitUntilReady()
         try await jobQueue.push(BarrierJob())
         // push job onto processing queue
-        let jobIterator = jobQueue.queue.makeAsyncIterator()
+        var jobIterator = jobQueue.queue.makeAsyncIterator()
         _ = try #require(try await jobIterator.next())
 
         /// Create a second queue, and start processing. Job set to processing on first queue

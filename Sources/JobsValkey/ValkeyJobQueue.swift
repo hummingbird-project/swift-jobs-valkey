@@ -6,16 +6,16 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-import Jobs
-import Logging
-import NIOCore
-import Synchronization
-import Valkey
+public import Jobs
+public import Logging
+public import NIOCore
+public import Synchronization
+public import Valkey
 
 #if canImport(FoundationEssentials)
-import FoundationEssentials
+public import FoundationEssentials
 #else
-import Foundation
+public import Foundation
 #endif
 
 /// Valkey implementation of job queue driver
@@ -225,7 +225,7 @@ public final class ValkeyJobQueue: JobQueueDriver {
     /// - Parameters:
     ///   - jobID: Job id
     @inlinable
-    public func failed(jobID: JobID, error: Error) async throws {
+    public func failed(jobID: JobID, error: any Error) async throws {
         if self.configuration.retentionPolicy.failedJobs == .retain {
             _ = try await self.valkeyClient.execute(
                 LREM(self.configuration.processingQueueKey, count: 0, element: jobID),
@@ -357,7 +357,7 @@ extension ValkeyJobQueue {
         let queue: ValkeyJobQueue
 
         @inlinable
-        public func next() async throws -> Element? {
+        mutating public func next() async throws -> Element? {
             while true {
                 if self.queue.isStopped.load(ordering: .relaxed) {
                     return nil

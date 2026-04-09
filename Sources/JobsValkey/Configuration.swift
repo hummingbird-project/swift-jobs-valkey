@@ -7,7 +7,7 @@
 //
 
 import NIOCore
-import Valkey
+public import Valkey
 
 extension ValkeyJobQueue {
     /// Valkey Job queue configuration
