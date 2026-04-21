@@ -45,7 +45,7 @@ public struct ValkeyJobCleanupParameters: Sendable & Codable {
 }
 
 /// Parameters for cleanup of jobs stuck in processing
-public struct ValkeyProcessingJobCleanupParameters: Sendable, Codable {
+public struct ValkeyOrphanedJobCleanupParameters: Sendable, Codable {
     let maxJobsToProcess: Int
 
     ///  Initialize ValkeyProcessingJobCleanupParameters
@@ -55,8 +55,10 @@ public struct ValkeyProcessingJobCleanupParameters: Sendable, Codable {
         self.maxJobsToProcess = maxJobsToProcess
     }
 }
+@available(*, deprecated, renamed: "ValkeyOrphanedJobCleanupParameters")
+public typealias ValkeyProcessingJobCleanupParameters = ValkeyOrphanedJobCleanupParameters
 
-extension ValkeyJobQueue {
+extension ValkeyJobQueue: JobServiceDriver {
     /// how to cleanup a job
     public struct JobCleanup: Sendable, Codable {
         enum RawValue: Codable {
@@ -114,7 +116,7 @@ extension ValkeyJobQueue {
     /// clean of hung processing jobs job name.
     ///
     /// Use this with the ``/Jobs/JobSchedule`` to schedule a cleanup hung processing jobs
-    public var cleanupProcessingJob: JobName<ValkeyProcessingJobCleanupParameters> {
+    public var cleanupProcessingJob: JobName<ValkeyOrphanedJobCleanupParameters> {
         .init("_Jobs_ValkeyProcessingCleanup_\(self.configuration.queueName)")
     }
 
@@ -137,6 +139,65 @@ extension ValkeyJobQueue {
                 try await self.cleanupProcessingJobs(maxJobsToProcess: parameters.maxJobsToProcess)
             }
         )
+    }
+
+    /// Queue cleanup schedule options
+    public struct CleanupOptions: JobQueueCleanupOptionsProtocol {
+        /// Cleanup options for jobs in various types of state (completed, failed, cancelled, paused)
+        var jobs: JobCleanup?
+        /// Orphaned job cleanup options
+        ///
+        /// An orphaned job is a job who that finished because the server it was running on crashed
+        var orphaned: OrphanedJobsCleanup
+
+        public init(
+            jobs: JobCleanup? = .init(),
+            orphaned: OrphanedJobsCleanup = .init()
+        ) {
+            self.jobs = jobs
+            self.orphaned = orphaned
+        }
+
+        public static var `default`: Self { .init() }
+
+        /// Cleanup options for jobs in various types of state (completed, failed, cancelled, paused)
+        public struct JobCleanup: Sendable {
+            var parameters: ValkeyJobCleanupParameters
+            var schedule: Schedule
+
+            public init(
+                parameters: ValkeyJobCleanupParameters = .init(),
+                schedule: Schedule = .daily()
+            ) {
+                self.parameters = parameters
+                self.schedule = schedule
+            }
+        }
+
+        /// Orphaned job cleanup options
+        public struct OrphanedJobsCleanup: Sendable {
+            var parameters: ValkeyOrphanedJobCleanupParameters
+            var schedule: Schedule
+
+            public init(
+                parameters: ValkeyOrphanedJobCleanupParameters = .init(maxJobsToProcess: .max),
+                schedule: Schedule = .onMinutes([0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55])
+            ) {
+                self.parameters = parameters
+                self.schedule = schedule
+            }
+        }
+    }
+
+    /// Schedule queue cleanup
+    /// - Parameters:
+    ///   - schedule: Job schedule to add cleanup scheduled jobs
+    ///   - options: options
+    public func scheduleQueueCleanup(_ schedule: inout JobSchedule, options: CleanupOptions) {
+        schedule.addJob(self.cleanupProcessingJob, parameters: options.orphaned.parameters, schedule: options.orphaned.schedule)
+        if let jobCleanup = options.jobs {
+            schedule.addJob(self.cleanupJob, parameters: jobCleanup.parameters, schedule: jobCleanup.schedule)
+        }
     }
 
     /// Cleanup job queues
