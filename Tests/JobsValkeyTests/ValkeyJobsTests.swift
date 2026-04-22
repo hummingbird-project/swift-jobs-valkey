@@ -1157,7 +1157,7 @@ struct JobsValkeyTests {
         ) {
             CatchJobMiddleware(cont: cont)
         }
-        try await withThrowingTaskGroup(of: Void.self) { group in
+        await withThrowingTaskGroup(of: Void.self) { group in
             let serviceGroup = ServiceGroup(
                 configuration: .init(
                     services: [valkeyDriver.valkeyClient, jobService],
@@ -1169,8 +1169,12 @@ struct JobsValkeyTests {
                 try await serviceGroup.run()
             }
             var iterator = stream.makeAsyncIterator()
-            let value = try await #require(iterator.next())
-            let value2 = try await #require(iterator.next())
+            let value = await iterator.next()
+            let value2 = await iterator.next()
+            guard let value, let value2 else {
+                Issue.record()
+                return
+            }
             let values: Set<String> = [value, value2]
             #expect(values == Set([valkeyDriver.cleanupJob.name, valkeyDriver.cleanupProcessingJob.name]))
             await serviceGroup.triggerGracefulShutdown()
