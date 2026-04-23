@@ -55,8 +55,6 @@ public struct ValkeyOrphanedJobCleanupParameters: Sendable, Codable {
         self.maxJobsToProcess = maxJobsToProcess
     }
 }
-@available(*, deprecated, renamed: "ValkeyOrphanedJobCleanupParameters")
-public typealias ValkeyProcessingJobCleanupParameters = ValkeyOrphanedJobCleanupParameters
 
 extension ValkeyJobQueue: JobServiceDriver {
     /// how to cleanup a job
