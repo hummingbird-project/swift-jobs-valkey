@@ -20,6 +20,7 @@ public import Foundation
 
 /// Valkey implementation of job queue driver
 public final class ValkeyJobQueue: JobQueueDriver {
+    /// Identifier for a job instance
     public struct JobID: Sendable, CustomStringConvertible, Equatable, Codable, RESPStringRenderable, RESPTokenDecodable {
         @usableFromInline
         let value: UUID
@@ -136,7 +137,7 @@ public final class ValkeyJobQueue: JobQueueDriver {
     /// Initialize loading of functions and wait until it has finished
     public func waitUntilReady() async throws {
         try await self.loadFunctions()
-        try await self.cleanupProcessingJobs(maxJobsToProcess: .max)
+        try await self.cleanupOrphanedJobs(maxJobsToProcess: .max)
     }
 
     ///  Register job
