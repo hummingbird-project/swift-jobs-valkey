@@ -103,7 +103,7 @@ extension ValkeyJobQueue: JobServiceDriver {
         public static func remove(maxAge: Duration) -> Self { .init(rawValue: .remove(maxAge: maxAge)) }
     }
 
-    /// clean up job name.
+    /// `JobName` for cleanup job.
     ///
     /// Use this with the ``/Jobs/JobSchedule`` to schedule a cleanup of
     /// failed, cancelled or completed jobs
@@ -111,14 +111,14 @@ extension ValkeyJobQueue: JobServiceDriver {
         .init("_Jobs_ValkeyCleanup_\(self.configuration.queueName)")
     }
 
-    /// clean of orphaned jobs who were left processing by a crashed server job name.
+    /// `JobName` for re-queuing of orphaned jobs job.
     ///
     /// Use this with the ``/Jobs/JobSchedule`` to schedule a cleanup hung processing jobs
     public var cleanupOrphanedJob: JobName<ValkeyOrphanedJobCleanupParameters> {
         .init("_Jobs_ValkeyOrphanedCleanup_\(self.configuration.queueName)")
     }
 
-    /// register clean up job on queue
+    /// register clean up jobs on queue
     func registerCleanupJob() {
         self.registerJob(
             JobDefinition(name: cleanupJob, retryStrategy: .dontRetry) { parameters, context in
