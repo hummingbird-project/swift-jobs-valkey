@@ -22,16 +22,22 @@ import Valkey
 struct JobsValkeyTests {
     static let valkeyHostname = ProcessInfo.processInfo.environment["VALKEY_HOSTNAME"] ?? "127.0.0.1"
 
-    func createJobQueue(
-        configuration: ValkeyJobQueue.Configuration = .init(),
-        function: String = #function
-    ) async throws -> JobQueue<ValkeyJobQueue> {
-        var logger = Logger(label: function)
+    func createValkeyJobDriver(
+        configuration: ValkeyJobQueue.Configuration
+    ) async throws -> ValkeyJobQueue {
+        var logger = Logger(label: configuration.queueName)
         logger.logLevel = .trace
         let valkey = ValkeyClient(.hostname(Self.valkeyHostname, port: 6379), logger: logger)
-        return try await JobQueue(
-            .valkey(valkey, configuration: configuration, logger: logger),
-            logger: logger,
+        return try await .valkey(valkey, configuration: configuration, logger: logger)
+    }
+
+    func createJobQueue(
+        configuration: ValkeyJobQueue.Configuration,
+    ) async throws -> JobQueue<ValkeyJobQueue> {
+        let valkeyDriver = try await createValkeyJobDriver(configuration: configuration)
+        return JobQueue(
+            valkeyDriver,
+            logger: valkeyDriver.logger,
             options: .init(
                 defaultRetryStrategy: .exponentialJitter(maxBackoff: .milliseconds(10))
             )
@@ -46,10 +52,9 @@ struct JobsValkeyTests {
         processingOptions: JobQueueProcessorOptions = .init(numWorkers: 1),
         configuration: ValkeyJobQueue.Configuration,
         failedJobsInitialization: ValkeyJobQueue.JobCleanup = .remove,
-        test: (JobQueue<ValkeyJobQueue>) async throws -> T,
-        function: String = #function
+        test: (JobQueue<ValkeyJobQueue>) async throws -> T
     ) async throws -> T {
-        let jobQueue = try await createJobQueue(configuration: configuration, function: function)
+        let jobQueue = try await createJobQueue(configuration: configuration)
         return try await withThrowingTaskGroup(of: Void.self) { group in
             let serviceGroup = ServiceGroup(
                 configuration: .init(
@@ -604,7 +609,6 @@ struct JobsValkeyTests {
         }
         let expectation = TestExpectation()
         try await self.testJobQueue(
-
             configuration: .init(
                 queueName: #function,
                 retentionPolicy: .init(completedJobs: .retain)
@@ -695,7 +699,7 @@ struct JobsValkeyTests {
     }
 
     @Test func testPausedJobRetention() async throws {
-        let jobQueue = try await self.createJobQueue()
+        let jobQueue = try await self.createJobQueue(configuration: .init(queueName: #function))
         let jobName = JobName<Int>("testPausedJobRetention")
         jobQueue.registerJob(name: jobName) { _, _ in }
 
@@ -1088,6 +1092,91 @@ struct JobsValkeyTests {
                 try await serviceGroup.run()
             }
             _ = await stream.first { _ in true }
+            await serviceGroup.triggerGracefulShutdown()
+        }
+    }
+
+    @Test
+    func testJobService() async throws {
+        struct TestParameters: JobParameters {
+            static let jobName = "runJob"
+            let value: Int
+        }
+        var logger = Logger(label: "runJob")
+        logger.logLevel = .trace
+        let valkeyDriver = try await createValkeyJobDriver(configuration: .init(queueName: #function))
+        let jobService = JobService(
+            valkeyDriver,
+            logger: valkeyDriver.logger
+        )
+        return try await withThrowingTaskGroup(of: Void.self) { group in
+            let serviceGroup = ServiceGroup(
+                configuration: .init(
+                    services: [valkeyDriver.valkeyClient, jobService],
+                    gracefulShutdownSignals: [.sigterm, .sigint],
+                    logger: logger
+                )
+            )
+            group.addTask {
+                try await serviceGroup.run()
+            }
+            let (stream, cont) = AsyncStream.makeStream(of: Int.self)
+            jobService.registerJob(parameters: TestParameters.self) { parameter, _ in
+                cont.yield(parameter.value)
+            }
+
+            try await jobService.push(TestParameters(value: 4))
+            let value = await stream.first { _ in true }
+            #expect(value == 4)
+
+            await serviceGroup.triggerGracefulShutdown()
+        }
+    }
+
+    /// Check scheduled cleanup jobs run
+    @Test
+    func testJobServiceCleanup() async throws {
+        struct CatchJobMiddleware: JobMiddleware {
+            let cont: AsyncStream<String>.Continuation
+            func onPushJob<Parameters>(name: String, parameters: Parameters, context: JobPushQueueContext) async {
+                cont.yield(name)
+            }
+        }
+        let dateComponents = Calendar.current.dateComponents([.hour, .minute, .second], from: Date.now + 1)
+        let valkeyDriver = try await createValkeyJobDriver(configuration: .init(queueName: #function))
+        let (stream, cont) = AsyncStream.makeStream(of: String.self)
+        let jobService = JobService(
+            valkeyDriver,
+            logger: valkeyDriver.logger,
+            options: .init(
+                cleanup: .init(
+                    jobs: .init(schedule: .everyMinute(second: dateComponents.second!)),
+                    orphaned: .init(schedule: .everyMinute(second: dateComponents.second!))
+                )
+            )
+        ) {
+            CatchJobMiddleware(cont: cont)
+        }
+        await withThrowingTaskGroup(of: Void.self) { group in
+            let serviceGroup = ServiceGroup(
+                configuration: .init(
+                    services: [valkeyDriver.valkeyClient, jobService],
+                    gracefulShutdownSignals: [.sigterm, .sigint],
+                    logger: jobService.logger
+                )
+            )
+            group.addTask {
+                try await serviceGroup.run()
+            }
+            var iterator = stream.makeAsyncIterator()
+            let value = await iterator.next()
+            let value2 = await iterator.next()
+            guard let value, let value2 else {
+                Issue.record()
+                return
+            }
+            let values: Set<String> = [value, value2]
+            #expect(values == Set([valkeyDriver.cleanupJob.name, valkeyDriver.cleanupProcessingJob.name]))
             await serviceGroup.triggerGracefulShutdown()
         }
     }
