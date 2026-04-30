@@ -84,16 +84,19 @@ public final class ValkeyJobQueue: JobQueueDriver {
         }
     }
 
-    public enum ValkeyQueueError: Error, CustomStringConvertible {
-        case unexpectedValkeyKeyType
-        case jobMissing(JobID)
+    public struct ValkeyQueueError: Error, CustomStringConvertible {
+        enum Internal {
+            case unexpectedValkeyResponse
+        }
+        let value: Internal
+
+        /// Valkey command returned an unexpected token
+        public static var unexpectedValkeyResponse: Self { .init(value: .unexpectedValkeyResponse) }
 
         public var description: String {
-            switch self {
-            case .unexpectedValkeyKeyType:
-                return "Unexpected Valkey key type"
-            case .jobMissing(let value):
-                return "Job associated with \(value) is missing"
+            switch self.value {
+            case .unexpectedValkeyResponse:
+                return "Unexpected Valkey Response"
             }
         }
     }

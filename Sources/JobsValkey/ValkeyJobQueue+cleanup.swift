@@ -331,7 +331,7 @@ extension ValkeyJobQueue: JobServiceDriver {
                 break
             }
             guard let jobIDs = try? [JobID](response) else {
-                throw ValkeyQueueError.unexpectedValkeyKeyType
+                throw ValkeyQueueError.unexpectedValkeyResponse
             }
             try await self.delete(jobIDs: jobIDs)
         }
