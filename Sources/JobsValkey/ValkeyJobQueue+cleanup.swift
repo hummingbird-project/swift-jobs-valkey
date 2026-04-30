@@ -44,11 +44,11 @@ public struct ValkeyJobCleanupParameters: Sendable & Codable {
     }
 }
 
-/// Parameters for cleanup of jobs stuck in processing
+/// Parameters for cleanup of orphaned jobs stuck in processing
 public struct ValkeyOrphanedJobCleanupParameters: Sendable, Codable {
     let maxJobsToProcess: Int
 
-    ///  Initialize ValkeyProcessingJobCleanupParameters
+    ///  Initialize ValkeyOrphanedJobCleanupParameters
     /// - Parameters:
     ///   - maxJobsToProcess: Maximum number of jobs to process in one go
     public init(maxJobsToProcess: Int) {
@@ -90,7 +90,7 @@ extension ValkeyJobQueue: JobServiceDriver {
         public static var remove: Self { .init(rawValue: .remove) }
     }
 
-    /// how to cleanup a currently processing job
+    /// how to cleanup a job in the pending queue
     public struct PendingJobCleanup: Sendable, Codable, Equatable {
         enum RawValue: Codable, Equatable {
             case doNothing
@@ -103,7 +103,7 @@ extension ValkeyJobQueue: JobServiceDriver {
         public static func remove(maxAge: Duration) -> Self { .init(rawValue: .remove(maxAge: maxAge)) }
     }
 
-    /// clean up job name.
+    /// `JobName` for cleanup job.
     ///
     /// Use this with the ``/Jobs/JobSchedule`` to schedule a cleanup of
     /// failed, cancelled or completed jobs
@@ -111,14 +111,14 @@ extension ValkeyJobQueue: JobServiceDriver {
         .init("_Jobs_ValkeyCleanup_\(self.configuration.queueName)")
     }
 
-    /// clean of hung processing jobs job name.
+    /// `JobName` for re-queuing of orphaned jobs job.
     ///
     /// Use this with the ``/Jobs/JobSchedule`` to schedule a cleanup hung processing jobs
-    public var cleanupProcessingJob: JobName<ValkeyOrphanedJobCleanupParameters> {
-        .init("_Jobs_ValkeyProcessingCleanup_\(self.configuration.queueName)")
+    public var cleanupOrphanedJob: JobName<ValkeyOrphanedJobCleanupParameters> {
+        .init("_Jobs_ValkeyOrphanedCleanup_\(self.configuration.queueName)")
     }
 
-    /// register clean up job on queue
+    /// register clean up jobs on queue
     func registerCleanupJob() {
         self.registerJob(
             JobDefinition(name: cleanupJob, retryStrategy: .dontRetry) { parameters, context in
@@ -133,8 +133,8 @@ extension ValkeyJobQueue: JobServiceDriver {
             }
         )
         self.registerJob(
-            JobDefinition(name: cleanupProcessingJob, retryStrategy: .dontRetry) { parameters, context in
-                try await self.cleanupProcessingJobs(maxJobsToProcess: parameters.maxJobsToProcess)
+            JobDefinition(name: cleanupOrphanedJob, retryStrategy: .dontRetry) { parameters, context in
+                try await self.cleanupOrphanedJobs(maxJobsToProcess: parameters.maxJobsToProcess)
             }
         )
     }
@@ -149,7 +149,7 @@ extension ValkeyJobQueue: JobServiceDriver {
         var orphaned: OrphanedJobsCleanup
 
         public init(
-            jobs: JobCleanup? = .init(),
+            jobs: JobCleanup? = nil,
             orphaned: OrphanedJobsCleanup = .init()
         ) {
             self.jobs = jobs
@@ -192,7 +192,7 @@ extension ValkeyJobQueue: JobServiceDriver {
     ///   - schedule: Job schedule to add cleanup scheduled jobs
     ///   - options: options
     public func scheduleQueueCleanup(_ schedule: inout JobSchedule, options: CleanupOptions) {
-        schedule.addJob(self.cleanupProcessingJob, parameters: options.orphaned.parameters, schedule: options.orphaned.schedule)
+        schedule.addJob(self.cleanupOrphanedJob, parameters: options.orphaned.parameters, schedule: options.orphaned.schedule)
         if let jobCleanup = options.jobs {
             schedule.addJob(self.cleanupJob, parameters: jobCleanup.parameters, schedule: jobCleanup.schedule)
         }
@@ -235,8 +235,8 @@ extension ValkeyJobQueue: JobServiceDriver {
         try await self.cleanupSortedSet(key: self.configuration.pausedQueueKey, cleanup: pausedJobs)
     }
 
-    /// Clean up jobs stuck in processing because their worker is no longer active
-    public func cleanupProcessingJobs(maxJobsToProcess: Int) async throws {
+    /// Clean up orphaned jobs stuck in processing because their worker is no longer active
+    public func cleanupOrphanedJobs(maxJobsToProcess: Int) async throws {
         do {
             let bytes: [UInt8] = (0..<16).map { _ in UInt8.random(in: 0...255) }
             let lockID = ByteBuffer(string: Base64.encodeToString(bytes: bytes))
@@ -271,7 +271,7 @@ extension ValkeyJobQueue: JobServiceDriver {
                 }
             }
         } catch {
-            self.logger.info("Cleanup of hung processing jobs failed: \(error)")
+            self.logger.info("Cleanup of orphaned jobs failed: \(error)")
             throw error
         }
     }
@@ -331,7 +331,7 @@ extension ValkeyJobQueue: JobServiceDriver {
                 break
             }
             guard let jobIDs = try? [JobID](response) else {
-                throw ValkeyQueueError.unexpectedValkeyKeyType
+                throw ValkeyQueueError.unexpectedValkeyResponse
             }
             try await self.delete(jobIDs: jobIDs)
         }

@@ -20,6 +20,7 @@ public import Foundation
 
 /// Valkey implementation of job queue driver
 public final class ValkeyJobQueue: JobQueueDriver {
+    /// Identifier for a job instance
     public struct JobID: Sendable, CustomStringConvertible, Equatable, Codable, RESPStringRenderable, RESPTokenDecodable {
         @usableFromInline
         let value: UUID
@@ -84,16 +85,19 @@ public final class ValkeyJobQueue: JobQueueDriver {
         }
     }
 
-    public enum ValkeyQueueError: Error, CustomStringConvertible {
-        case unexpectedValkeyKeyType
-        case jobMissing(JobID)
+    public struct ValkeyQueueError: Error, CustomStringConvertible {
+        enum Internal {
+            case unexpectedValkeyResponse
+        }
+        let value: Internal
+
+        /// Valkey command returned an unexpected token
+        public static var unexpectedValkeyResponse: Self { .init(value: .unexpectedValkeyResponse) }
 
         public var description: String {
-            switch self {
-            case .unexpectedValkeyKeyType:
-                return "Unexpected Valkey key type"
-            case .jobMissing(let value):
-                return "Job associated with \(value) is missing"
+            switch self.value {
+            case .unexpectedValkeyResponse:
+                return "Unexpected Valkey Response"
             }
         }
     }
@@ -133,7 +137,7 @@ public final class ValkeyJobQueue: JobQueueDriver {
     /// Initialize loading of functions and wait until it has finished
     public func waitUntilReady() async throws {
         try await self.loadFunctions()
-        try await self.cleanupProcessingJobs(maxJobsToProcess: .max)
+        try await self.cleanupOrphanedJobs(maxJobsToProcess: .max)
     }
 
     ///  Register job

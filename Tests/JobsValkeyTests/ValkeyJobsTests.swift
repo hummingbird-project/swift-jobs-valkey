@@ -1176,7 +1176,7 @@ struct JobsValkeyTests {
                 return
             }
             let values: Set<String> = [value, value2]
-            #expect(values == Set([valkeyDriver.cleanupJob.name, valkeyDriver.cleanupProcessingJob.name]))
+            #expect(values == Set([valkeyDriver.cleanupJob.name, valkeyDriver.cleanupOrphanedJob.name]))
             await serviceGroup.triggerGracefulShutdown()
         }
     }

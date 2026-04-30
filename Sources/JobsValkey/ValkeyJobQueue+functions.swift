@@ -25,7 +25,7 @@ extension ValkeyJobQueue {
     /// If running the job queue handler this is done automatically. If you are not
     /// running the job queue handler you should call this to ensure the job queue
     /// functions are available.
-    public func loadFunctions() async throws {
+    func loadFunctions() async throws {
         // Only load function if they don't exist or the version number is different
         do {
             let version = try await self.valkeyClient.fcall(function: "swiftjobs_version").decode(as: Int.self)
