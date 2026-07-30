@@ -27,7 +27,7 @@ public final class ValkeyJobQueue: JobQueueDriver {
 
         @usableFromInline
         init() {
-            self.value = UUID()
+            self.value = UUID._version7()
         }
 
         init?(uuidString: String) {
