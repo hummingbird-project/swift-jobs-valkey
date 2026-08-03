@@ -97,7 +97,19 @@ public final class ValkeyJobQueue: JobQueueDriver {
         }
     }
 
+    @usableFromInline
+    enum Status: String, Sendable {
+        case pending
+        case processing
+        case failed
+        case cancelled
+        case paused
+        case completed
+    }
+
     /// metadata keys
+    @usableFromInline
+    static let statusKey = "status"
     static let workerIDMetaDataKey = "workerID"
     static let processingStartedMetaDataKey = "processingStarted"
 
@@ -188,6 +200,10 @@ public final class ValkeyJobQueue: JobQueueDriver {
                         member: id.description
                     )
                 ]
+            ),
+            HMSET(
+                id.valkeyMetadataKey(for: self),
+                data: [.init(field: Self.statusKey, value: Status.pending.rawValue)]
             )
         ).3.get()
     }
@@ -206,6 +222,10 @@ public final class ValkeyJobQueue: JobQueueDriver {
                         member: jobID.description
                     )
                 ]
+            ),
+            HMSET(
+                jobID.valkeyMetadataKey(for: self),
+                data: [.init(field: Self.statusKey, value: Status.pending.rawValue)]
             )
         ).1.get()
     }
@@ -220,7 +240,11 @@ public final class ValkeyJobQueue: JobQueueDriver {
         if self.configuration.retentionPolicy.completedJobs == .retain {
             _ = try await self.valkeyClient.execute(
                 LREM(self.configuration.processingQueueKey, count: 0, element: jobID),
-                ZADD(self.configuration.completedQueueKey, data: [.init(score: Date.now.timeIntervalSince1970, member: jobID)])
+                ZADD(self.configuration.completedQueueKey, data: [.init(score: Date.now.timeIntervalSince1970, member: jobID)]),
+                HMSET(
+                    jobID.valkeyMetadataKey(for: self),
+                    data: [.init(field: Self.statusKey, value: Status.completed.rawValue)]
+                )
             ).1.get()
         } else {
             _ = try await self.valkeyClient.execute(
@@ -240,7 +264,11 @@ public final class ValkeyJobQueue: JobQueueDriver {
         if self.configuration.retentionPolicy.failedJobs == .retain {
             _ = try await self.valkeyClient.execute(
                 LREM(self.configuration.processingQueueKey, count: 0, element: jobID),
-                ZADD(self.configuration.failedQueueKey, data: [.init(score: Date.now.timeIntervalSince1970, member: jobID)])
+                ZADD(self.configuration.failedQueueKey, data: [.init(score: Date.now.timeIntervalSince1970, member: jobID)]),
+                HMSET(
+                    jobID.valkeyMetadataKey(for: self),
+                    data: [.init(field: Self.statusKey, value: Status.failed.rawValue)]
+                )
             ).1.get()
         } else {
             _ = try await self.valkeyClient.execute(
@@ -277,6 +305,7 @@ public final class ValkeyJobQueue: JobQueueDriver {
                 data: [
                     .init(field: Self.workerIDMetaDataKey, value: self.context.workerID),
                     .init(field: Self.processingStartedMetaDataKey, value: "\(Date.now.timeIntervalSince1970)"),
+                    .init(field: Self.statusKey, value: Status.processing.rawValue),
                 ]
             )
         )
