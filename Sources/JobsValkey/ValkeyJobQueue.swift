@@ -263,16 +263,19 @@ public final class ValkeyJobQueue: JobQueueDriver {
             return nil
         }
 
-        if let buffer = try await self.get(jobID: jobID) {
+        let results = await self.valkeyClient.execute(
+            GET(jobID.valkeyKey(for: self)),
+            HMSET(
+                jobID.valkeyMetadataKey(for: self),
+                data: [
+                    .init(field: Self.workerIDMetaDataKey, value: self.context.workerID),
+                    .init(field: Self.processingStartedMetaDataKey, value: "\(Date.now.timeIntervalSince1970)"),
+                ]
+            )
+        )
+        if let buffer = try results.0.get().map({ ByteBuffer($0) }) {
             do {
                 let jobInstance = try self.jobRegistry.decode(buffer)
-                try await self.valkeyClient.hmset(
-                    jobID.valkeyMetadataKey(for: self),
-                    data: [
-                        .init(field: Self.workerIDMetaDataKey, value: self.context.workerID),
-                        .init(field: Self.processingStartedMetaDataKey, value: "\(Date.now.timeIntervalSince1970)"),
-                    ]
-                )
                 return .init(id: jobID, result: .success(jobInstance))
             } catch let error as JobQueueError {
                 return .init(id: jobID, result: .failure(error))

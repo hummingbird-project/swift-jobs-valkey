@@ -1142,7 +1142,7 @@ struct JobsValkeyTests {
                 cont.yield(name)
             }
         }
-        let dateComponents = Calendar.current.dateComponents([.hour, .minute, .second], from: Date.now + 1)
+        let dateComponents = Calendar.current.dateComponents([.hour, .minute, .second], from: Date.now + 2)
         let valkeyDriver = try await createValkeyJobDriver(configuration: .init(queueName: #function))
         let (stream, cont) = AsyncStream.makeStream(of: String.self)
         let jobService = JobService(
