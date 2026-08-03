@@ -67,7 +67,7 @@ extension ValkeyJobQueue {
                     local function cancelAndRetain(keys, args)
                         if redis.call("ZREM", keys[1], args[1]) > 0 then
                             redis.call("ZADD", keys[2], args[2], args[1])
-                            redis.call("HSET", keys[3], "status", args[3])
+                            redis.call("HSET", keys[3], \(Self.statusKey), args[3])
                         end
                         return redis.status_reply('OK')
                     end
@@ -79,7 +79,7 @@ extension ValkeyJobQueue {
                         end
                         redis.call("ZREM", keys[1], args[1])
                         redis.call("ZADD", keys[2], score, args[1])
-                        redis.call("HSET", keys[3], "status", args[2])
+                        redis.call("HSET", keys[3], \(Self.statusKey), args[2])
                         return redis.status_reply('OK')
                     end
 
