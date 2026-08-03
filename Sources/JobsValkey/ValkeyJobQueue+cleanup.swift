@@ -265,6 +265,10 @@ extension ValkeyJobQueue: JobServiceDriver {
                                         member: id
                                     )
                                 ]
+                            ),
+                            HSET(
+                                id.valkeyMetadataKey(for: self),
+                                data: [.init(field: Self.statusKey, value: Status.pending.rawValue)]
                             )
                         ).1.get()
                     }

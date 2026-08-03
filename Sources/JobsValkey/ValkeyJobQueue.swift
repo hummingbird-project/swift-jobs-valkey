@@ -192,6 +192,10 @@ public final class ValkeyJobQueue: JobQueueDriver {
             LREM(self.configuration.processingQueueKey, count: 0, element: id),
             DEL(keys: [self.valkeyMetadataKey(forJobID: id)]),
             SET(self.valkeyKey(forJobID: id), value: buffer),
+            HSET(
+                self.valkeyMetadataKey(forJobID: id),
+                data: [.init(field: Self.statusKey, value: Status.pending.rawValue)]
+            ),
             ZADD(
                 self.configuration.pendingQueueKey,
                 data: [
@@ -200,10 +204,6 @@ public final class ValkeyJobQueue: JobQueueDriver {
                         member: id.description
                     )
                 ]
-            ),
-            HMSET(
-                id.valkeyMetadataKey(for: self),
-                data: [.init(field: Self.statusKey, value: Status.pending.rawValue)]
             )
         ).3.get()
     }
@@ -223,7 +223,7 @@ public final class ValkeyJobQueue: JobQueueDriver {
                     )
                 ]
             ),
-            HMSET(
+            HSET(
                 jobID.valkeyMetadataKey(for: self),
                 data: [.init(field: Self.statusKey, value: Status.pending.rawValue)]
             )
@@ -241,7 +241,7 @@ public final class ValkeyJobQueue: JobQueueDriver {
             _ = try await self.valkeyClient.execute(
                 LREM(self.configuration.processingQueueKey, count: 0, element: jobID),
                 ZADD(self.configuration.completedQueueKey, data: [.init(score: Date.now.timeIntervalSince1970, member: jobID)]),
-                HMSET(
+                HSET(
                     jobID.valkeyMetadataKey(for: self),
                     data: [.init(field: Self.statusKey, value: Status.completed.rawValue)]
                 )
@@ -265,8 +265,8 @@ public final class ValkeyJobQueue: JobQueueDriver {
             _ = try await self.valkeyClient.execute(
                 LREM(self.configuration.processingQueueKey, count: 0, element: jobID),
                 ZADD(self.configuration.failedQueueKey, data: [.init(score: Date.now.timeIntervalSince1970, member: jobID)]),
-                HMSET(
-                    jobID.valkeyMetadataKey(for: self),
+                HSET(
+                    self.valkeyMetadataKey(forJobID: jobID),
                     data: [.init(field: Self.statusKey, value: Status.failed.rawValue)]
                 )
             ).1.get()
@@ -300,7 +300,7 @@ public final class ValkeyJobQueue: JobQueueDriver {
 
         let results = await self.valkeyClient.execute(
             GET(self.valkeyKey(forJobID: jobID)),
-            HMSET(
+            HSET(
                 self.valkeyMetadataKey(forJobID: jobID),
                 data: [
                     .init(field: Self.workerIDMetaDataKey, value: self.context.workerID),
@@ -430,8 +430,8 @@ extension ValkeyJobQueue: CancellableJobQueue {
         if self.configuration.retentionPolicy.cancelledJobs == .retain {
             _ = try await self.valkeyClient.fcall(
                 function: "swiftjobs_cancelAndRetain",
-                keys: [self.configuration.pendingQueueKey, self.configuration.cancelledQueueKey],
-                args: [jobID.description, "\(Date.now.timeIntervalSince1970)"]
+                keys: [self.configuration.pendingQueueKey, self.configuration.cancelledQueueKey, jobID.valkeyMetadataKey(for: self)],
+                args: [jobID.description, "\(Date.now.timeIntervalSince1970)", Status.cancelled.rawValue]
             )
         } else {
             _ = try await self.valkeyClient.execute(
@@ -452,8 +452,8 @@ extension ValkeyJobQueue: ResumableJobQueue {
     public func pause(jobID: JobID) async throws {
         _ = try await self.valkeyClient.fcall(
             function: "swiftjobs_pauseResume",
-            keys: [self.configuration.pendingQueueKey, self.configuration.pausedQueueKey],
-            args: [jobID.description]
+            keys: [self.configuration.pendingQueueKey, self.configuration.pausedQueueKey, jobID.valkeyMetadataKey(for: self)],
+            args: [jobID.description, Status.paused.rawValue]
         )
     }
 
@@ -466,8 +466,8 @@ extension ValkeyJobQueue: ResumableJobQueue {
     public func resume(jobID: JobID) async throws {
         _ = try await self.valkeyClient.fcall(
             function: "swiftjobs_pauseResume",
-            keys: [self.configuration.pausedQueueKey, self.configuration.pendingQueueKey],
-            args: [jobID.description]
+            keys: [self.configuration.pausedQueueKey, self.configuration.pendingQueueKey, jobID.valkeyMetadataKey(for: self)],
+            args: [jobID.description, Status.pending.rawValue]
         )
     }
 }
