@@ -422,10 +422,24 @@ extension ValkeyJobQueue: JobServiceDriver {
 
     /// Push all the entries from list back onto the main list.
     func rerunSet(key: ValkeyKey) async throws {
-        _ = try await self.valkeyClient.fcall(
-            function: "swiftjobs_rerunQueue",
-            keys: [key, self.configuration.pendingQueueKey]
-        )
+        while true {
+            let values = try await self.valkeyClient.rpop(key, count: 100)?.decode(as: RESPToken.Array.self)
+            guard let values, values.count > 0 else {
+                break
+            }
+            var commands: [any ValkeyCommand] = try values.compactMap { value in
+                try JobID(uuidString: String(value)).map {
+                    HSET(
+                        $0.valkeyMetadataKey(for: self),
+                        data: [.init(field: Self.statusKey, value: Status.pending.rawValue)]
+                    )
+                }
+            }
+            try commands.append(
+                ZADD(self.configuration.pendingQueueKey, data: values.map { .init(score: Date.now.timeIntervalSince1970, member: try String($0)) })
+            )
+            _ = await self.valkeyClient.execute(commands)
+        }
     }
 
     /// Delete all entries from queue
@@ -444,11 +458,21 @@ extension ValkeyJobQueue: JobServiceDriver {
 
     /// Push all the entries from sorted set back onto the pending sorted set.
     func rerunSortedSet(key: ValkeyKey) async throws {
-        try await self.valkeyClient.withConnection { connection in
-            _ = try await connection.transaction(
-                ZUNIONSTORE(destination: self.configuration.pendingQueueKey, keys: [self.configuration.pendingQueueKey, key]),
-                DEL(keys: [key])
-            )
+        while true {
+            let values = try await self.valkeyClient.zpopmin(key, count: 100)
+            guard values.count > 0 else {
+                break
+            }
+            var commands: [any ValkeyCommand] = values.compactMap { value in
+                JobID(uuidString: String(value.value)).map {
+                    HSET(
+                        $0.valkeyMetadataKey(for: self),
+                        data: [.init(field: Self.statusKey, value: Status.pending.rawValue)]
+                    )
+                }
+            }
+            commands.append(ZADD(self.configuration.pendingQueueKey, data: values.map { .init(score: $0.score, member: $0.value) }))
+            _ = await self.valkeyClient.execute(commands)
         }
     }
 
