@@ -47,11 +47,6 @@ public final class ValkeyJobQueue: JobQueueDriver {
             self.value.uuidString.encode(into: &commandEncoder)
         }
 
-        @inlinable
-        func valkeyKey(for queue: ValkeyJobQueue) -> ValkeyKey { .init("\(queue.configuration.queueName)/\(self.value)") }
-        @inlinable
-        func valkeyMetadataKey(for queue: ValkeyJobQueue) -> ValkeyKey { .init("\(queue.configuration.queueName)/\(self.value).metadata") }
-
         /// String description of Identifier
         public var description: String {
             self.value.uuidString
@@ -140,6 +135,18 @@ public final class ValkeyJobQueue: JobQueueDriver {
         try await self.cleanupOrphanedJobs(maxJobsToProcess: .max)
     }
 
+    /// Return the Valkey key for a job
+    @inlinable
+    public func valkeyKey(forJobID jobID: JobID) -> ValkeyKey {
+        .init("\(self.configuration.queueName)/\(jobID.value)")
+    }
+
+    /// Return the Valkey key for the metadata of a job
+    @inlinable
+    public func valkeyMetadataKey(forJobID jobID: JobID) -> ValkeyKey {
+        .init("\(self.configuration.queueName)/\(jobID.value).metadata")
+    }
+
     ///  Register job
     /// - Parameters:
     ///   - job: Job Definition
@@ -171,8 +178,8 @@ public final class ValkeyJobQueue: JobQueueDriver {
         let buffer = try self.jobRegistry.encode(jobRequest: jobRequest)
         _ = try await self.valkeyClient.execute(
             LREM(self.configuration.processingQueueKey, count: 0, element: id),
-            DEL(keys: [id.valkeyMetadataKey(for: self)]),
-            SET(id.valkeyKey(for: self), value: buffer),
+            DEL(keys: [self.valkeyMetadataKey(forJobID: id)]),
+            SET(self.valkeyKey(forJobID: id), value: buffer),
             ZADD(
                 self.configuration.pendingQueueKey,
                 data: [
@@ -190,7 +197,7 @@ public final class ValkeyJobQueue: JobQueueDriver {
     func push<Parameters>(jobID: JobID, jobRequest: JobRequest<Parameters>, options: JobOptions) async throws {
         let buffer = try self.jobRegistry.encode(jobRequest: jobRequest)
         _ = try await valkeyClient.execute(
-            SET(jobID.valkeyKey(for: self), value: buffer),
+            SET(self.valkeyKey(forJobID: jobID), value: buffer),
             ZADD(
                 self.configuration.pendingQueueKey,
                 data: [
@@ -218,7 +225,7 @@ public final class ValkeyJobQueue: JobQueueDriver {
         } else {
             _ = try await self.valkeyClient.execute(
                 LREM(self.configuration.processingQueueKey, count: 0, element: jobID),
-                DEL(keys: [jobID.valkeyKey(for: self), jobID.valkeyMetadataKey(for: self)])
+                DEL(keys: [self.valkeyKey(forJobID: jobID), self.valkeyMetadataKey(forJobID: jobID)])
             ).1.get()
         }
     }
@@ -238,7 +245,7 @@ public final class ValkeyJobQueue: JobQueueDriver {
         } else {
             _ = try await self.valkeyClient.execute(
                 LREM(self.configuration.processingQueueKey, count: 0, element: jobID),
-                DEL(keys: [jobID.valkeyKey(for: self), jobID.valkeyMetadataKey(for: self)])
+                DEL(keys: [self.valkeyKey(forJobID: jobID), self.valkeyMetadataKey(forJobID: jobID)])
             ).1.get()
         }
     }
@@ -267,7 +274,7 @@ public final class ValkeyJobQueue: JobQueueDriver {
             do {
                 let jobInstance = try self.jobRegistry.decode(buffer)
                 try await self.valkeyClient.hmset(
-                    jobID.valkeyMetadataKey(for: self),
+                    self.valkeyMetadataKey(forJobID: jobID),
                     data: [
                         .init(field: Self.workerIDMetaDataKey, value: self.context.workerID),
                         .init(field: Self.processingStartedMetaDataKey, value: "\(Date.now.timeIntervalSince1970)"),
@@ -283,11 +290,11 @@ public final class ValkeyJobQueue: JobQueueDriver {
     }
 
     func get(jobID: JobID) async throws -> ByteBuffer? {
-        try await self.valkeyClient.get(jobID.valkeyKey(for: self)).map { ByteBuffer($0) }
+        try await self.valkeyClient.get(self.valkeyKey(forJobID: jobID)).map { ByteBuffer($0) }
     }
 
     func delete(jobIDs: [JobID]) async throws {
-        _ = try await self.valkeyClient.del(keys: jobIDs.flatMap { [$0.valkeyKey(for: self), $0.valkeyMetadataKey(for: self)] })
+        _ = try await self.valkeyClient.del(keys: jobIDs.flatMap { [self.valkeyKey(forJobID: $0), self.valkeyMetadataKey(forJobID: $0)] })
     }
 
     @usableFromInline
@@ -397,7 +404,7 @@ extension ValkeyJobQueue: CancellableJobQueue {
         } else {
             _ = try await self.valkeyClient.execute(
                 ZREM(self.configuration.pendingQueueKey, members: [jobID]),
-                DEL(keys: [jobID.valkeyKey(for: self), jobID.valkeyMetadataKey(for: self)])
+                DEL(keys: [self.valkeyKey(forJobID: jobID), self.valkeyMetadataKey(forJobID: jobID)])
             ).1.get()
         }
     }
