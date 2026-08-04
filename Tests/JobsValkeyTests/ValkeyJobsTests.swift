@@ -832,7 +832,7 @@ struct JobsValkeyTests {
             processingJobs = try await jobQueue.queue.valkeyClient.llen(jobQueue.queue.configuration.processingQueueKey)
             #expect(processingJobs == 0)
 
-            let exists = try await jobQueue.queue.valkeyClient.exists(keys: [jobID.valkeyKey(for: jobQueue.queue)])
+            let exists = try await jobQueue.queue.valkeyClient.exists(keys: [jobQueue.queue.valkeyKey(forJobID: jobID)])
             #expect(exists == 0)
             group.cancelAll()
         }
@@ -876,7 +876,7 @@ struct JobsValkeyTests {
             )
             #expect(pendingJobs == 2)
 
-            let exists = try await jobQueue.queue.valkeyClient.exists(keys: [jobID.valkeyKey(for: jobQueue.queue)])
+            let exists = try await jobQueue.queue.valkeyClient.exists(keys: [jobQueue.queue.valkeyKey(forJobID: jobID)])
             #expect(exists == 1)
 
             try await jobQueue.queue.cleanup(pendingJobs: .remove)
@@ -1179,5 +1179,96 @@ struct JobsValkeyTests {
             #expect(values == Set([valkeyDriver.cleanupJob.name, valkeyDriver.cleanupOrphanedJob.name]))
             await serviceGroup.triggerGracefulShutdown()
         }
+    }
+
+    /// Check job queue validation works
+    @Test
+    func testValidate() async throws {
+        struct FailJob: Error {}
+        let dateComponents = Calendar.current.dateComponents([.hour, .minute, .second], from: Date.now + 1)
+        let valkeyDriver = try await createValkeyJobDriver(
+            configuration: .init(
+                queueName: #function,
+                retentionPolicy: .init(completedJobs: .retain, failedJobs: .retain, cancelledJobs: .retain)
+            )
+        )
+        let (stream, cont) = AsyncStream.makeStream(of: Void.self)
+        struct TestParameters: JobParameters {
+            static let jobName = "testValidate"
+            let fail: Bool
+        }
+        let jobService = JobService(
+            valkeyDriver,
+            logger: valkeyDriver.logger,
+            options: .init(
+                processor: .init(numWorkers: 1),
+                cleanup: .init(
+                    jobs: .init(schedule: .everyMinute(second: dateComponents.second!)),
+                    orphaned: .init(schedule: .everyMinute(second: dateComponents.second!))
+                )
+            )
+        )
+        jobService.registerJob(parameters: TestParameters.self) { parameters, context in
+            context.logger.info("Parameters=\(parameters)")
+            try await Task.sleep(for: .milliseconds(Int.random(in: 10..<50)))
+            if parameters.fail {
+                throw FailJob()
+            }
+            cont.yield()
+        }
+        async let _ = valkeyDriver.valkeyClient.run()
+
+        try await jobService.push(TestParameters(fail: false))
+        try await jobService.push(TestParameters(fail: false))
+        try await jobService.push(TestParameters(fail: true))
+        try await jobService.push(TestParameters(fail: false))
+        try await jobService.push(TestParameters(fail: false))
+        try await jobService.push(TestParameters(fail: false))
+        let pausedID = try await jobService.push(TestParameters(fail: true))
+        let cancelledID = try await jobService.push(TestParameters(fail: false))
+        try await jobService.pauseJob(jobID: pausedID)
+        try await jobService.cancelJob(jobID: cancelledID)
+
+        await withThrowingTaskGroup(of: Void.self) { group in
+            let serviceGroup = ServiceGroup(
+                configuration: .init(
+                    services: [jobService],
+                    gracefulShutdownSignals: [.sigterm, .sigint],
+                    logger: jobService.logger
+                )
+            )
+            group.addTask {
+                try await serviceGroup.run()
+            }
+            var iterator = stream.makeAsyncIterator()
+            for _ in 0..<4 {
+                await iterator.next()
+            }
+            await serviceGroup.triggerGracefulShutdown()
+        }
+        try await jobService.queue.queue.validateDatabase {
+            Issue.record("\($0): job IDs \($1) are invalid")
+        }
+        let jobValues = try await valkeyDriver.valkeyClient.zpopmin(jobService.queue.queue.configuration.completedQueueKey)
+        let jobID = try #require(jobValues.first.flatMap { ValkeyJobQueue.JobID(uuidString: String($0.value)) })
+        let called = Atomic(false)
+        try await jobService.queue.queue.validateDatabase { error, jobs in
+            called.store(true, ordering: .relaxed)
+            // we deleted an item from the completed job list so we should expect an
+            // unreferenced job key
+            #expect(error == .job)
+            #expect(jobs == [jobID])
+        }
+        #expect(called.load(ordering: .relaxed) == true)
+
+        try await jobService.queue.queue.cleanup(
+            pendingJobs: .remove,
+            processingJobs: .remove,
+            completedJobs: .remove,
+            failedJobs: .remove,
+            cancelledJobs: .remove,
+            pausedJobs: .remove
+        )
+        try await valkeyDriver.valkeyClient.del(keys: [jobService.queue.queue.valkeyKey(forJobID: jobID)])
     }
 }

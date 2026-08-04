@@ -244,7 +244,7 @@ extension ValkeyJobQueue: JobServiceDriver {
             let ids = try await self.valkeyClient.lrange(self.configuration.processingQueueKey, start: 0, stop: maxJobsToProcess)
             for id in ids {
                 let id = try JobID(id)
-                if let workerID = try await self.valkeyClient.hget(id.valkeyMetadataKey(for: self), field: Self.workerIDMetaDataKey).map({
+                if let workerID = try await self.valkeyClient.hget(self.valkeyMetadataKey(forJobID: id), field: Self.workerIDMetaDataKey).map({
                     String($0)
                 }) {
                     var inactive = workersInactive.contains(workerID)
@@ -273,6 +273,107 @@ extension ValkeyJobQueue: JobServiceDriver {
         } catch {
             self.logger.info("Cleanup of orphaned jobs failed: \(error)")
             throw error
+        }
+    }
+
+    /// Type of validation error returned by ``ValkeyJobQueue/validateDatabase(_:)``
+    public struct ValidationError: Equatable {
+        enum Value: Equatable {
+            case pending
+            case paused
+            case processing
+            case cancelled
+            case failed
+            case completed
+            case job
+        }
+
+        let value: Value
+
+        /// JobIDs in pending list but equivalent JobID key does not exist
+        public static var pending: Self { .init(value: .pending) }
+        /// JobIDs in paused list but equivalent JobID key does not exist
+        public static var paused: Self { .init(value: .pending) }
+        /// JobIDs in processing list but equivalent JobID key does not exist
+        public static var processing: Self { .init(value: .pending) }
+        /// JobIDs in cancelled list but equivalent JobID key does not exist
+        public static var cancelled: Self { .init(value: .pending) }
+        /// JobIDs in failed list but equivalent JobID key does not exist
+        public static var failed: Self { .init(value: .pending) }
+        /// JobIDs in completed list but equivalent JobID key does not exist
+        public static var completed: Self { .init(value: .pending) }
+        /// JobIDs key exists but is not present in any lists
+        public static var job: Self { .init(value: .pending) }
+    }
+    /// Validate valkey queue database entries are correct.
+    ///
+    /// This should only ever be run if nobody is processing jobs on the queue
+    /// - All jobs in lists should have corresponding job keys
+    /// - All job keys should have a corresponding entry in a list
+    ///
+    /// - Parameters:
+    ///   - report: Closure called with Job IDs with issues
+    public func validateDatabase(
+        _ report: (ValidationError, Set<JobID>) -> Void
+    ) async throws {
+        func sortedSetKeys(_ key: ValkeyKey) async throws -> Set<JobID> {
+            let maxKeys = 100
+            var keys: Set<JobID> = []
+            var index = 0
+            while true {
+                let rangeResponse = try await self.valkeyClient.zrange(key, start: "\(index)", stop: "\(index + maxKeys)")
+                try keys.formUnion(
+                    rangeResponse.lazy.compactMap { try JobID(uuidString: String($0)) }
+                )
+                if rangeResponse.count < maxKeys {
+                    return keys
+                }
+                index += maxKeys
+            }
+        }
+
+        func validateKeyList(_ keys: Set<JobID>, foundKeys: inout Set<JobID>, validationError: ValidationError) {
+            let notFoundKeys = keys.subtracting(foundKeys)
+            if !notFoundKeys.isEmpty {
+                report(validationError, notFoundKeys)
+            }
+            foundKeys.subtract(keys)
+        }
+
+        // Get list of job keys by scanning database
+        var cursor = 0
+        var foundKeys: Set<JobID> = []
+        repeat {
+            let scanResponse = try await self.valkeyClient.scan(
+                cursor: cursor,
+                pattern: "\(self.configuration.queueName)/*",
+                count: 100,
+                type: "string"
+            )
+            cursor = scanResponse.cursor
+            try foundKeys.formUnion(
+                scanResponse.keys.lazy.compactMap {
+                    let key = try String($0)
+                    let keyWithoutPrefix = String(key.dropFirst(self.configuration.queueName.count + 1))
+                    return JobID(uuidString: keyWithoutPrefix)
+                }
+            )
+        } while cursor != 0
+
+        try await validateKeyList(sortedSetKeys(self.configuration.pendingQueueKey), foundKeys: &foundKeys, validationError: .pending)
+        try await validateKeyList(sortedSetKeys(self.configuration.pausedQueueKey), foundKeys: &foundKeys, validationError: .paused)
+        try await validateKeyList(sortedSetKeys(self.configuration.cancelledQueueKey), foundKeys: &foundKeys, validationError: .cancelled)
+        try await validateKeyList(sortedSetKeys(self.configuration.failedQueueKey), foundKeys: &foundKeys, validationError: .failed)
+        try await validateKeyList(sortedSetKeys(self.configuration.completedQueueKey), foundKeys: &foundKeys, validationError: .completed)
+        let processingKeys: Set<JobID> = try await .init(
+            self.valkeyClient.lrange(self.configuration.processingQueueKey, start: 0, stop: -1).lazy.compactMap {
+                try JobID(uuidString: String($0))
+            }
+        )
+        validateKeyList(processingKeys, foundKeys: &foundKeys, validationError: .processing)
+
+        if !foundKeys.isEmpty {
+            report(.job, foundKeys)
         }
     }
 
