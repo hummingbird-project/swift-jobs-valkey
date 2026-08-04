@@ -267,7 +267,7 @@ extension ValkeyJobQueue: JobServiceDriver {
                                 ]
                             ),
                             HSET(
-                                id.valkeyMetadataKey(for: self),
+                                self.valkeyMetadataKey(forJobID: id),
                                 data: [.init(field: Self.statusKey, value: Status.pending.rawValue)]
                             )
                         ).1.get()
@@ -430,7 +430,7 @@ extension ValkeyJobQueue: JobServiceDriver {
             var commands: [any ValkeyCommand] = try values.compactMap { value in
                 try JobID(uuidString: String(value)).map {
                     HSET(
-                        $0.valkeyMetadataKey(for: self),
+                        self.valkeyMetadataKey(forJobID: $0),
                         data: [.init(field: Self.statusKey, value: Status.pending.rawValue)]
                     )
                 }
@@ -466,7 +466,7 @@ extension ValkeyJobQueue: JobServiceDriver {
             var commands: [any ValkeyCommand] = values.compactMap { value in
                 JobID(uuidString: String(value.value)).map {
                     HSET(
-                        $0.valkeyMetadataKey(for: self),
+                        self.valkeyMetadataKey(forJobID: $0),
                         data: [.init(field: Self.statusKey, value: Status.pending.rawValue)]
                     )
                 }
