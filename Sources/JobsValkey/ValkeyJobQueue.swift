@@ -317,6 +317,7 @@ public final class ValkeyJobQueue: JobQueueDriver {
                 return .init(id: jobID, result: .failure(error))
             }
         } else {
+            try await self.valkeyClient.del(keys: [self.valkeyMetadataKey(forJobID: jobID)])
             return .init(id: jobID, result: .failure(JobQueueError(code: .unrecognisedJobId, jobName: nil)))
         }
     }
