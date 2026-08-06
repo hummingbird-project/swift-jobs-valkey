@@ -33,65 +33,61 @@ extension ValkeyJobQueue {
         } catch let error as ValkeyClientError where error.errorCode == .commandError {
         }
         try await self.loadFunctions.acquire {
-            do {
-                _ = try await self.valkeyClient.functionLoad(
-                    replace: true,
-                    functionCode: """
-                        #!lua name=_swift_jobs_valkey
+            _ = try await self.valkeyClient.functionLoad(
+                replace: true,
+                functionCode: """
+                    #!lua name=_swift_jobs_valkey
 
-                        local function version()
-                            return \(Self.FunctionVersion)
+                    local function version()
+                        return \(Self.FunctionVersion)
+                    end
+
+                    local function pop(keys, args)
+                        local values = redis.call("ZPOPMIN", keys[1])
+                        if #(values) == 0 then 
+                            return nil
                         end
-
-                        local function pop(keys, args)
-                            local values = redis.call("ZPOPMIN", keys[1])
-                            if #(values) == 0 then 
-                                return nil
-                            end
-                            if tonumber(values[2]) > tonumber(args[1]) then
-                                redis.call("ZADD", keys[1], values[2], values[1])
-                                return nil
-                            end
-                            redis.call("LPUSH", keys[2], values[1])
-                            return values[1]
+                        if tonumber(values[2]) > tonumber(args[1]) then
+                            redis.call("ZADD", keys[1], values[2], values[1])
+                            return nil
                         end
+                        redis.call("LPUSH", keys[2], values[1])
+                        return values[1]
+                    end
 
-                        local function cancel(keys, args)
-                            if redis.call("ZREM", keys[1], args[1]) > 0 then
-                                redis.call("DEL", keys[2])
-                            end
-                            return redis.status_reply('OK')
+                    local function cancel(keys, args)
+                        if redis.call("ZREM", keys[1], args[1]) > 0 then
+                            redis.call("DEL", keys[2])
                         end
+                        return redis.status_reply('OK')
+                    end
 
-                        local function cancelAndRetain(keys, args)
-                            if redis.call("ZREM", keys[1], args[1]) > 0 then
-                                redis.call("ZADD", keys[2], args[2], args[1])
-                                redis.call("HSET", keys[3], "\(Self.statusKey)", args[3])
-                            end
-                            return redis.status_reply('OK')
+                    local function cancelAndRetain(keys, args)
+                        if redis.call("ZREM", keys[1], args[1]) > 0 then
+                            redis.call("ZADD", keys[2], args[2], args[1])
+                            redis.call("HSET", keys[3], "\(Self.statusKey)", args[3])
                         end
+                        return redis.status_reply('OK')
+                    end
 
-                        local function pauseResume(keys, args)
-                            local score = redis.call("ZSCORE", keys[1], args[1])
-                            if score == nil then
-                                return nil
-                            end
-                            redis.call("ZREM", keys[1], args[1])
-                            redis.call("ZADD", keys[2], score, args[1])
-                            redis.call("HSET", keys[3], "\(Self.statusKey)", args[2])
-                            return redis.status_reply('OK')
+                    local function pauseResume(keys, args)
+                        local score = redis.call("ZSCORE", keys[1], args[1])
+                        if score == nil then
+                            return nil
                         end
+                        redis.call("ZREM", keys[1], args[1])
+                        redis.call("ZADD", keys[2], score, args[1])
+                        redis.call("HSET", keys[3], "\(Self.statusKey)", args[2])
+                        return redis.status_reply('OK')
+                    end
 
-                        server.register_function('swiftjobs_version', version)
-                        server.register_function('swiftjobs_pop', pop)
-                        server.register_function('swiftjobs_cancel', cancel)
-                        server.register_function('swiftjobs_cancelAndRetain', cancelAndRetain)
-                        server.register_function('swiftjobs_pauseResume', pauseResume)
-                        """
-                )
-            } catch {
-                throw error
-            }
+                    server.register_function('swiftjobs_version', version)
+                    server.register_function('swiftjobs_pop', pop)
+                    server.register_function('swiftjobs_cancel', cancel)
+                    server.register_function('swiftjobs_cancelAndRetain', cancelAndRetain)
+                    server.register_function('swiftjobs_pauseResume', pauseResume)
+                    """
+            )
         }
     }
 }
