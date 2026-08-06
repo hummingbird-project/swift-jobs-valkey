@@ -90,7 +90,6 @@ extension ValkeyJobQueue {
                         """
                 )
             } catch {
-                print("\(error)")
                 throw error
             }
         }
