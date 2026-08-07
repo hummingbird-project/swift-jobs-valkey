@@ -11,7 +11,7 @@ import NIOCore
 import Valkey
 
 extension ValkeyJobQueue {
-    static let FunctionVersion = 1
+    static let FunctionVersion = 2
     /// Upload Valkey JobQueue lua functions to server.
     ///
     /// This includes functions
@@ -19,13 +19,11 @@ extension ValkeyJobQueue {
     /// - swiftjobs_cancel: Called when cancelling a job
     /// - swiftjobs_cancelAndRetain: Called when cancelling a job and cancelled jobs are retained
     /// - swiftjobs_pauseResume: Called when moving between paused and non-paused state
-    /// - swiftjobs_rerunQueue: Called during job cleanup and moving the contents of processing set
-    ///        back onto the pending queue.
     ///
     /// If running the job queue handler this is done automatically. If you are not
     /// running the job queue handler you should call this to ensure the job queue
     /// functions are available.
-    func loadFunctions() async throws {
+    public func loadFunctions() async throws {
         // Only load function if they don't exist or the version number is different
         do {
             let version = try await self.valkeyClient.fcall(function: "swiftjobs_version").decode(as: Int.self)
@@ -41,7 +39,7 @@ extension ValkeyJobQueue {
                     #!lua name=_swift_jobs_valkey
 
                     local function version()
-                        return 1
+                        return \(Self.FunctionVersion)
                     end
 
                     local function pop(keys, args)
@@ -67,6 +65,7 @@ extension ValkeyJobQueue {
                     local function cancelAndRetain(keys, args)
                         if redis.call("ZREM", keys[1], args[1]) > 0 then
                             redis.call("ZADD", keys[2], args[2], args[1])
+                            redis.call("HSET", keys[3], "\(Self.statusKey)", args[3])
                         end
                         return redis.status_reply('OK')
                     end
@@ -78,17 +77,7 @@ extension ValkeyJobQueue {
                         end
                         redis.call("ZREM", keys[1], args[1])
                         redis.call("ZADD", keys[2], score, args[1])
-                        return redis.status_reply('OK')
-                    end
-
-                    local function rerunQueue(keys, args)
-                        while true do
-                            local value = redis.call("RPOP", keys[1])
-                            if value == false then
-                                break
-                            end
-                            redis.call("ZADD", keys[2], 0, value)
-                        end
+                        redis.call("HSET", keys[3], "\(Self.statusKey)", args[2])
                         return redis.status_reply('OK')
                     end
 
@@ -97,7 +86,6 @@ extension ValkeyJobQueue {
                     server.register_function('swiftjobs_cancel', cancel)
                     server.register_function('swiftjobs_cancelAndRetain', cancelAndRetain)
                     server.register_function('swiftjobs_pauseResume', pauseResume)
-                    server.register_function('swiftjobs_rerunQueue', rerunQueue)
                     """
             )
         }
