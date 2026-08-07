@@ -28,7 +28,8 @@ let package = Package(
         .library(name: "JobsValkey", targets: ["JobsValkey"])
     ],
     dependencies: [
-        .package(url: "https://github.com/hummingbird-project/swift-jobs.git", from: "1.3.0"),
+        .package(url: "https://github.com/hummingbird-project/swift-jobs.git", branch: "jobs-api"),
+        .package(url: "https://github.com/apple/swift-nio.git", from: "2.100.0"),
         .package(url: "https://github.com/valkey-io/valkey-swift", from: "1.3.2"),
     ],
     targets: [
@@ -36,6 +37,8 @@ let package = Package(
             name: "JobsValkey",
             dependencies: [
                 .product(name: "Jobs", package: "swift-jobs"),
+                .product(name: "NIOCore", package: "swift-nio"),
+                .product(name: "NIOFoundationEssentialsCompat", package: "swift-nio"),
                 .product(name: "Valkey", package: "valkey-swift"),
             ],
             swiftSettings: defaultSwiftSettings

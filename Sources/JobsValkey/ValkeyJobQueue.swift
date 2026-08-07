@@ -30,6 +30,10 @@ public final class ValkeyJobQueue: JobQueueDriver {
             self.value = UUID._version7()
         }
 
+        init(uuid: UUID) {
+            self.value = uuid
+        }
+
         init?(uuidString: String) {
             guard let value = UUID(uuidString: uuidString) else { return nil }
             self.value = value
@@ -105,6 +109,7 @@ public final class ValkeyJobQueue: JobQueueDriver {
         case cancelled
         case paused
         case completed
+        case unknown
     }
 
     /// metadata keys
