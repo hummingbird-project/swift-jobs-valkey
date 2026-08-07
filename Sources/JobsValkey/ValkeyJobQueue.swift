@@ -110,6 +110,7 @@ public final class ValkeyJobQueue: JobQueueDriver {
     /// metadata keys
     @usableFromInline
     static let statusKey = "status"
+    @usableFromInline
     static let workerIDMetaDataKey = "workerID"
     static let processingStartedMetaDataKey = "processingStarted"
 
@@ -179,7 +180,7 @@ public final class ValkeyJobQueue: JobQueueDriver {
         return jobInstanceID
     }
 
-    /// Retry job data onto queue
+    /// Retry job
     /// - Parameters:
     ///   - id: Job instance ID
     ///   - jobRequest: Job request
@@ -190,7 +191,7 @@ public final class ValkeyJobQueue: JobQueueDriver {
         let buffer = try self.jobRegistry.encode(jobRequest: jobRequest)
         _ = try await self.valkeyClient.execute(
             LREM(self.configuration.processingQueueKey, count: 0, element: id),
-            DEL(keys: [self.valkeyMetadataKey(forJobID: id)]),
+            HDEL(self.valkeyMetadataKey(forJobID: id), fields: [Self.workerIDMetaDataKey]),
             SET(self.valkeyKey(forJobID: id), value: buffer),
             HSET(
                 self.valkeyMetadataKey(forJobID: id),
