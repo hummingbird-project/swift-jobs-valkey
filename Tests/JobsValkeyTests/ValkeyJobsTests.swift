@@ -799,6 +799,57 @@ struct JobsValkeyTests {
         }
     }
 
+    @Test func testDoNotRetainOption() async throws {
+        struct TestParameters: JobParameters {
+            static let jobName = "testDoNotRetainOption"
+            let fail: Bool
+        }
+        let (stream, cont) = AsyncStream.makeStream(of: Void.self)
+        struct FailedError: Error {}
+        var logger = Logger(label: "JobsTests")
+        logger.logLevel = .trace
+        var jobDefinition = JobDefinition(
+            parameters: TestParameters.self
+        ) { parameters, context in
+            cont.yield()
+            if parameters.fail {
+                throw FailedError()
+            }
+        }
+        jobDefinition.options.insert([.doNotRetainCompleted, .doNotRetainFailed])
+
+        try await self.testJobQueue(
+            processingOptions: .init(numWorkers: 1),
+            configuration: .init(
+                queueName: #function,
+                retentionPolicy: .init(completedJobs: .retain, failedJobs: .retain, cancelledJobs: .doNotRetain)
+            )
+        ) { jobQueue in
+            jobQueue.registerJob(jobDefinition)
+            try await jobQueue.push(TestParameters(fail: false))
+            try await jobQueue.push(TestParameters(fail: true))
+            try await jobQueue.push(TestParameters(fail: false))
+
+            var iterator = stream.makeAsyncIterator()
+            _ = await iterator.next()
+            _ = await iterator.next()
+            _ = await iterator.next()
+
+            let completedJobsCount = try await jobQueue.queue.valkeyClient.zcount(
+                jobQueue.queue.configuration.completedQueueKey,
+                min: 0,
+                max: .infinity
+            )
+            #expect(completedJobsCount == 0)
+            let failedJobsCount = try await jobQueue.queue.valkeyClient.zcount(
+                jobQueue.queue.configuration.completedQueueKey,
+                min: 0,
+                max: .infinity
+            )
+            #expect(failedJobsCount == 0)
+        }
+    }
+
     @Test func testCleanupProcessingJobs() async throws {
         let jobQueue = try await self.createJobQueue(
 

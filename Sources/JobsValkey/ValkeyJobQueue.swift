@@ -237,8 +237,8 @@ public final class ValkeyJobQueue: JobQueueDriver {
     /// - Parameters:
     ///   - jobID: Job id
     @inlinable
-    public func finished(jobID: JobID) async throws {
-        if self.configuration.retentionPolicy.completedJobs == .retain {
+    public func finished(jobID: JobID, retain: Bool) async throws {
+        if retain && self.configuration.retentionPolicy.completedJobs == .retain {
             _ = try await self.valkeyClient.execute(
                 LREM(self.configuration.processingQueueKey, count: 0, element: jobID),
                 ZADD(self.configuration.completedQueueKey, data: [.init(score: Date.now.timeIntervalSince1970, member: jobID)]),
@@ -255,14 +255,18 @@ public final class ValkeyJobQueue: JobQueueDriver {
         }
     }
 
+    public func finished(jobID: JobID) async throws {
+        preconditionFailure("This should no longer be called. Use finished(jobID:retain:)")
+    }
+
     /// Flag job failed to process
     ///
     /// Removes  job id from processing queue, adds to failed queue
     /// - Parameters:
     ///   - jobID: Job id
     @inlinable
-    public func failed(jobID: JobID, error: any Error) async throws {
-        if self.configuration.retentionPolicy.failedJobs == .retain {
+    public func failed(jobID: JobID, error: any Error, retain: Bool) async throws {
+        if retain && self.configuration.retentionPolicy.failedJobs == .retain {
             _ = try await self.valkeyClient.execute(
                 LREM(self.configuration.processingQueueKey, count: 0, element: jobID),
                 ZADD(self.configuration.failedQueueKey, data: [.init(score: Date.now.timeIntervalSince1970, member: jobID)]),
@@ -277,6 +281,10 @@ public final class ValkeyJobQueue: JobQueueDriver {
                 DEL(keys: [self.valkeyKey(forJobID: jobID), self.valkeyMetadataKey(forJobID: jobID)])
             ).1.get()
         }
+    }
+
+    public func failed(jobID: JobID, error: any Error) async throws {
+        preconditionFailure("This should no longer be called. Use failed(jobID:error:retain:)")
     }
 
     public func stop() async {
