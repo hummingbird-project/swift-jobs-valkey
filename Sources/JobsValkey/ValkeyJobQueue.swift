@@ -236,6 +236,7 @@ public final class ValkeyJobQueue: JobQueueDriver {
     /// Removes  job id from processing queue
     /// - Parameters:
     ///   - jobID: Job id
+    ///   - retain: Should we consider retaining this job
     @inlinable
     public func finished(jobID: JobID, retain: Bool) async throws {
         if retain && self.configuration.retentionPolicy.completedJobs == .retain {
@@ -264,6 +265,8 @@ public final class ValkeyJobQueue: JobQueueDriver {
     /// Removes  job id from processing queue, adds to failed queue
     /// - Parameters:
     ///   - jobID: Job id
+    ///   - error: Error that caused job failure
+    ///   - retain: Should we consider retaining this job
     @inlinable
     public func failed(jobID: JobID, error: any Error, retain: Bool) async throws {
         if retain && self.configuration.retentionPolicy.failedJobs == .retain {
