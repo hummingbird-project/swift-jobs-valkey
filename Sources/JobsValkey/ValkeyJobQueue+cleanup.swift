@@ -120,23 +120,23 @@ extension ValkeyJobQueue: JobServiceDriver {
 
     /// register clean up jobs on queue
     func registerCleanupJob() {
-        self.registerJob(
-            JobDefinition(name: cleanupJob, retryStrategy: .dontRetry) { parameters, context in
-                try await self.cleanup(
-                    pendingJobs: .doNothing,
-                    processingJobs: .doNothing,
-                    completedJobs: parameters.completedJobs,
-                    failedJobs: parameters.failedJobs,
-                    cancelledJobs: parameters.cancelledJobs,
-                    pausedJobs: parameters.pausedJobs
-                )
-            }
-        )
-        self.registerJob(
-            JobDefinition(name: cleanupOrphanedJob, retryStrategy: .dontRetry) { parameters, context in
-                try await self.cleanupOrphanedJobs(maxJobsToProcess: parameters.maxJobsToProcess)
-            }
-        )
+        var cleanupJob = JobDefinition(name: cleanupJob, retryStrategy: .dontRetry) { parameters, context in
+            try await self.cleanup(
+                pendingJobs: .doNothing,
+                processingJobs: .doNothing,
+                completedJobs: parameters.completedJobs,
+                failedJobs: parameters.failedJobs,
+                cancelledJobs: parameters.cancelledJobs,
+                pausedJobs: parameters.pausedJobs
+            )
+        }
+        cleanupJob.options.insert([.doNotRetainCompleted, .doNotRetainFailed])
+        self.registerJob(cleanupJob)
+        var cleanupProcessingJob = JobDefinition(name: cleanupOrphanedJob, retryStrategy: .dontRetry) { parameters, context in
+            try await self.cleanupOrphanedJobs(maxJobsToProcess: parameters.maxJobsToProcess)
+        }
+        cleanupProcessingJob.options.insert([.doNotRetainCompleted, .doNotRetainCompleted])
+        self.registerJob(cleanupProcessingJob)
     }
 
     /// Queue cleanup schedule options
