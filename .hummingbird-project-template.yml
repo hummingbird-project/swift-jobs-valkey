@@ -1,0 +1,16 @@
+ci:
+  linux:
+    env:
+      VALKEY_HOSTNAME: "valkey"
+    services: |
+      valkey:
+              image: valkey/valkey
+              ports:
+                - 6379:6379
+              options: --entrypoint valkey-server
+  mac:
+    enable_tests: false
+extra-codeowners:
+  - thoven87
+security:
+  version: 1.0.0
